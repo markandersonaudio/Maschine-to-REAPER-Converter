@@ -17,8 +17,14 @@ See:
 - `plugins/MaschineEQ/LICENSE`
 - `plugins/MaschineEQ/THIRD_PARTY_NOTICES.md`
 
+## Maschine → REAPER Converter
+
+The original Python converter code and support scripts under `converter/` are released under the **MIT License**. See `converter/LICENSE`.
+
+This component licence does not grant rights to third-party plug-ins, content, trademarks, presets, binaries, captured host state, or other proprietary material.
+
 ## Future converter components
 
-Non-JUCE converter components may use a different licence where appropriate. Their directories should contain an explicit licence or notice before public release.
+Other non-JUCE converter components may use a different licence where appropriate. Their directories should contain an explicit licence or notice before public release.
 
 This file is project documentation, not legal advice.
