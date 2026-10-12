@@ -1,0 +1,134 @@
+MASCHINE TRACKER V0.45.5
+=========================
+
+VARIATION BIAS / WEIGHT SAFETY
+------------------------------
+- Pad 13 LED is OFF when Bias is OFF.
+- Pad 14 LED is OFF when Weight is OFF.
+- Selecting any Bias while Weight is OFF automatically sets Weight to 25%.
+- While Bias is active, Pad 14 cycles 25 -> 50 -> 75 -> 100 -> 25; 0% is
+  deliberately unavailable because an active Bias at 0% has no musical effect.
+- Cycling Bias back to OFF automatically resets Weight to OFF/0%.
+- Pressing Pad 14 while Bias is OFF leaves Weight OFF.
+
+VARIATION RIGHT-SCREEN LABELS
+-----------------------------
+- The MK3 right display now uses multi-line descriptive labels for Variation pads.
+- P1-P4 explicitly show RANDOM STEP/PATTERN PROBABILITY and their ranges.
+- P5-P8 explicitly show RANDOM STEP/PATTERN VELOCITY and their ranges.
+- P9-P12 explicitly show RANDOM NOTE DENSITY 25/50/75/100%.
+- P13 reads RANDOM NOTE GENERATOR BIAS and includes an arrow toward P14.
+- P14 reads BIAS PERCENTAGE and also displays OFF or the current percentage.
+- P15/P16 explicitly show OCTAVE SPAN -/+.
+
+PRESERVED FROM V0.45.4
+----------------------
+- Variation probability Pads 1-4 remain quantized to 10% increments.
+- V0.45.3 VARIATION_MODE_GMEM = 15213 playback fix remains intact.
+- VARIATION remains CC87 / Trigger / 127 and latched in software.
+- Controller Editor mappings are unchanged; no template re-import is required when
+  upgrading from V0.45.4.
+
+HOTFIX
+------
+- Fixed VARIATION toggling the tracker internal playback state.
+- Root cause: VARIATION_MODE_GMEM was referenced by the MIDI Engine without
+  being assigned its intended address. JSFX therefore treated it as 0 and
+  wrote Variation state into gmem[0], the tracker playback flag.
+- MIDI Engine now defines VARIATION_MODE_GMEM = 15213, matching Lua and the
+  MK3 LED Bridge.
+- VARIATION remains CC87 / Trigger / 127 and remains a latched software mode.
+
+MASCHINE TRACKER V0.45.5 HOTFIX
+==============================
+
+- Fixes the remaining VARIATION start/restart regression by removing Gate behavior from the physical MK3 VARIATION control.
+- Restores the known-working V0.44 VARIATION mapping: CC87 / Trigger / value 127.
+- Variation mode is latched in software: press once to enter, press again to exit.
+- The MIDI engine consumes legacy V0.45.1 CC107 as a no-op.
+- MK3 LED feedback targets CC87 again.
+- IMPORTANT: import Maschine_Tracker_V0455_MK3.ncm3 when installing this hotfix.
+
+MASCHINE TRACKER V0.45.5 - CHANGES
+================================
+
+BASELINE
+- V0.45.5 is rebuilt from the clean V0.44 package.
+- Existing V0.44 playback, Arranger Pattern/REST/EMPTY behavior, song modes,
+  controller mappings, Jam support, undo/redo, scale system and visualizer are retained
+  unless explicitly changed below.
+
+TIME-BASED ARRANGER EDIT CURSOR
+- Arranger editing now uses one shared musical-time cursor in 1/128-note master ticks.
+- Changing Arranger tracks preserves musical time instead of copying a sequence-entry index.
+- Mixed Pattern/REST lengths therefore stay aligned while navigating between tracks.
+  Example: at tick 128 an 8-step/1-16 track can be on cell 3 while a 16-step/1-16
+  track is on cell 2; changing track no longer jumps earlier/later in the song.
+- If a destination track has no explicit material at the cursor time, the UI resolves a
+  virtual EMPTY cell at that exact musical time.
+- Placing a Pattern in empty time materializes exact EMPTY timing before it as needed so
+  the Pattern begins at the selected musical-time position.
+- After Pattern placement, the edit cursor advances to the exact musical-time end of that
+  Pattern, based on its actual Pattern length and step division.
+- Previous/next Arranger navigation now moves the musical-time anchor by actual cell timing.
+- Arranger Undo/Redo snapshots also preserve the musical-time edit anchor.
+- The existing V0.44 master-tick playback model is retained; this change is to editing and
+  display resolution, not to the working transport/sequencer timing model.
+
+LATCHED VARIATION MODE
+- VARIATION is a Trigger control (CC87). Its LED stays on while Variation mode is latched.
+- While VARIATION mode is active in normal tracker editing, Pads 1-16 become:
+
+  PROBABILITY
+    Pad 1  Current note: random Probability 0-100
+    Pad 2  Current note: random Probability 50-100
+    Pad 3  All NOTE-bearing steps in active Pattern: random Probability 0-100
+    Pad 4  All NOTE-bearing steps in active Pattern: random Probability 50-100
+
+  VELOCITY
+    Pad 5  Current note: random Velocity 60-127
+    Pad 6  Current note: random Velocity 1-59
+    Pad 7  All NOTE-bearing steps in active Pattern: random Velocity 60-127
+    Pad 8  All NOTE-bearing steps in active Pattern: random Velocity 1-59
+
+  NOTE GENERATION / DENSITY
+    Pad 9   Regenerate current Pattern at 25% density
+    Pad 10  Regenerate current Pattern at 50% density
+    Pad 11  Regenerate current Pattern at 75% density
+    Pad 12  Regenerate current Pattern at 100% density
+
+  BIAS / OCTAVE RANGE
+    Pad 13  Bias: OFF -> ROOT/OCT -> ROOT+5TH -> ROOT+4TH+5TH -> OFF
+    Pad 14  Weight: OFF while Bias OFF; 25 -> 50 -> 75 -> 100 -> 25 while Bias active
+    Pad 15  Octave span down (minimum 1 octave)
+    Pad 16  Octave span up (maximum 2 octaves)
+
+- Density generation first clears the current Pattern, then generates notes only inside its
+  active length. Generated steps use VEL 100, LEN 1, PRB 100, CMD OFF and VAL 0.
+- Each density-generation operation is one Undo/Redo action.
+- Scale Lock ON generates only notes in the selected scale. Scale Lock OFF is chromatic.
+- Bias weighting applies to root/octave, fifth, or fourth+fifth pitch classes as selected.
+  +100 forces generated notes into the active bias pool where available.
+- VARIATION pad groups have distinct pad/display colours for Probability, Velocity,
+  Density, Bias and Octave controls.
+- EVENTS (CC85) is released from the previous probability-randomize action. The tracker
+  consumes CC85 without performing an action so it cannot leak into instrument routing.
+
+FOLLOW + TOP BUTTON 6
+- Normal Top Button 6 remains DEFAULT STEP: reset all non-note fields on the current step.
+- FOLLOW + Top Button 6 now resets all non-note fields over the current active Pattern while
+  preserving every NOTE exactly:
+    VEL 100 / LEN 1 / PRB 100 / CMD OFF / VAL 0
+- The whole Pattern reset is one Undo/Redo action.
+- In ARRANGER, Top Button 6 remains INSERT REST.
+
+NORMAL RIGHT-SCREEN PAD GRID
+- The normal Pattern-editing 4x4 pad display is taller for easier reading.
+- Width and left/right alignment are retained, and the selected-note details remain clear.
+- Specialized mode screens retain their own layouts.
+
+CONTROLLER EDITOR
+- MK3 VARIATION / CC87 is restored to Trigger: value 127 / LED For MIDI In.
+- Existing 128/128 physical MK3 pad definitions remain Gate with no onIfDown attribute.
+- Existing 128/128 Pad#IDX LEDs remain display type 0 / Indexed colour mode 3.
+- Jam template behavior is otherwise unchanged from V0.44.
