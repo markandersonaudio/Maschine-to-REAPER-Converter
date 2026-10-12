@@ -1,0 +1,22 @@
+MASCHINE TRACKER - BUILD NOTES AFTER V0.45.5
+=========================================
+
+V0.45.5 COMPLETED
+- Rebuilt from the clean V0.44 package.
+- Arranger editing converted from per-track sequence-entry indexing to a shared
+  musical-time edit cursor.
+- VARIATION mode uses Probability, Velocity, Density, Bias and Octave controls. V0.45.5 latches the mode from a Trigger button rather than holding a Gate.
+- FOLLOW + Top Button 6 added for one-action current-Pattern non-note reset.
+- Normal right-screen 4x4 pad grid made taller.
+
+KEEP STABLE
+- Preserve the V0.44 master-tick playback/transport model unless a future reproducible
+  playback bug requires a targeted change.
+- Preserve Pattern / REST / EMPTY timing semantics and Arranger history.
+- Preserve confirmed MK3/Jam Controller Editor LED rules.
+
+DEFERRED / OPTIONAL FUTURE WORK
+- Arranger loop-point/range workflow for repeatedly auditioning a song section.
+- Arranger range/block copy and duplicate workflow for larger song sections.
+- Consider extending K8 later from REST duration to optional Pattern-cell repeat/duration.
+  Do not add this without an explicit request.
