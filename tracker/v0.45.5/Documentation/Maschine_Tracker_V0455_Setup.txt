@@ -1,0 +1,33 @@
+V0.45.5 HOTFIX IMPORTANT
+-----------------------
+Import the included Maschine_Tracker_V0455_MK3.ncm3 template.
+VARIATION uses the known-working V0.44 Trigger behavior on CC87. V0.45.5 removes the Gate/release mapping that caused playback/restart on the affected setup.
+
+MASCHINE TRACKER V0.45.5 - SETUP
+
+V0.45.4 -> V0.45.5: Controller mappings are unchanged. No Controller Editor re-import is required.
+==============================
+
+V0.45.5 is a full build based on V0.44. Keep your V0.44 package as a rollback copy.
+
+1. Import Maschine_Tracker_V0455_MK3.ncm3 in Native Instruments Controller Editor.
+2. Import Maschine_Tracker_V0455_Jam.ncmj if using Maschine Jam.
+3. In REAPER, replace the older tracker Lua/JSFX files with the V0.45.5 versions.
+4. Put Maschine Tracker MIDI Engine V0.45.5 on the tracker source track.
+5. Keep the V0.45.5 MK3 LED Bridge and Jam Bridge routed as in the working V0.44 setup.
+6. Run Maschine_Tracker_V0455.lua.
+7. Run Maschine_Tracker_Display_V0455.py for the MK3 screens.
+
+IMPORTANT CONTROLLER EDITOR CHECKS
+- VARIATION / CC87: Trigger, value 127, LED For MIDI In.
+- MK3 pad LEDs: For MIDI In + Indexed.
+- 4-D directions: Up CC30, Right CC31, Down CC32, Left CC33; all enabled.
+- Jam D-pad: Up CC21, Left CC22, Right CC23, Down CC24.
+
+V0.45.5 QUICK CHECK
+- In ARRANGER, create different-length Patterns on two tracks and move vertically/horizontally
+  between the tracks. The selected musical-time point must not jump.
+- Press VARIATION once: the right screen must show the V0.45.5 Variation layout and Pads 1-16 must
+  use its Probability/Velocity/Density/Bias/Octave functions.
+- In normal Pattern editing, hold FOLLOW and press Top Button 6: notes must remain unchanged
+  while VEL/LEN/PRB/CMD/VAL reset across the active Pattern.
