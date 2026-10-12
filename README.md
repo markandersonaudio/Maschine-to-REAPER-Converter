@@ -50,6 +50,15 @@ Editable REAPER .rpp
 
 ## Current status
 
+### Maschine → REAPER converter
+
+The current public converter mainline is **v0.20.5**.
+
+It converts the tested MXPRJ Pattern/Scene/Section structures into editable REAPER MIDI/arrangement data, reconstructs the stable one-zone Maschine Sampler path, restores supported external VST3 instrument state, and translates tested automation using exact parameter identities where available.
+
+v0.20.5 also reports categories it deliberately **did not attempt** in the completion dialog, conversion log, and automation JSON report. This is intended to make large-project tests auditable rather than silently implying unsupported content was converted.
+
+See [`converter/README.md`](converter/README.md) for the current capability matrix, known limitations, reverse-engineering findings, and research directions. The source for the current build is in [`converter/v0.20.5`](converter/v0.20.5).
 This repository is under active development.
 
 ### Internal FX recreation
