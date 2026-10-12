@@ -1996,7 +1996,8 @@ while(midirecv(midi_offset, msg1, msg2, msg3))
 
 
   status == 0xB0 ?
-  (    // CC41 = SETTINGS hold modifier.
+  (
+    // CC41 = SETTINGS hold modifier.
     //
     // Controller Editor:
     //   Mode = Gate, On 127, Off 0
