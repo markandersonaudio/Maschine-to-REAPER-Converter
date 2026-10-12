@@ -1,0 +1,34 @@
+MASCHINE TRACKER V0.45.5 - VALIDATION
+=====================================
+
+SOURCE BASE
+-----------
+Built directly from the confirmed-working V0.45.4 package.
+
+V0.45.5 CHANGES
+---------------
+- Variation Bias/Weight state coupling prevents an active Bias at 0% Weight.
+- Bias OFF forces Weight OFF/0%.
+- Selecting Bias from OFF automatically sets Weight to 25%.
+- P13/P14 hardware LEDs reflect OFF states.
+- Variation right-display pads use expanded multi-line labels and P13 -> P14 arrow.
+
+CHECKS PERFORMED
+----------------
+PASS - Python display syntax compilation.
+PASS - Variation display rendered in Bias OFF, Bias 25%, and Bias 100% states.
+PASS - MK3 Controller Editor XML parsing.
+PASS - Jam Controller Editor XML parsing.
+PASS - Source assertions confirm Bias selection auto-enables 25% Weight.
+PASS - Source assertions confirm Bias OFF forces Weight OFF/0%.
+PASS - Source assertions confirm active Weight cycle is 25/50/75/100 only.
+PASS - Source assertions confirm P13/P14 hardware LED OFF-state conditions.
+PASS - Source assertions confirm all requested expanded Variation labels.
+PASS - V0.45.4 10% probability quantization preserved.
+PASS - V0.45.3 playback fix preserved: VARIATION_MODE_GMEM = 15213.
+PASS - MK3 VARIATION mapping preserved as CC87 / Trigger / 127.
+
+LIMITATION
+----------
+Native JSFX compilation remains a REAPER-side test. Controller mappings are unchanged
+from V0.45.4, so no Controller Editor re-import is required for this update.
