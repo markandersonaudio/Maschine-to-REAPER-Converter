@@ -1,0 +1,26 @@
+MASCHINE TRACKER V0.45.5 - VARIATION BIAS / DISPLAY UPDATE
+===========================================================
+
+BIAS / WEIGHT
+-------------
+- Bias OFF: P13 LED OFF, Weight OFF/0%, P14 LED OFF.
+- Select any Bias: Weight automatically becomes 25% and P14 lights.
+- While Bias is active, P14 cycles 25%, 50%, 75%, 100%, then 25% again.
+- 0% cannot be selected while Bias is active.
+- Cycle Bias back to OFF: Weight immediately returns to OFF/0% and P14 turns off.
+
+RIGHT DISPLAY
+-------------
+Variation pads now show fuller multi-line descriptions:
+- P1-P4: RANDOM STEP/PATTERN PROBABILITY + range.
+- P5-P8: RANDOM STEP/PATTERN VELOCITY + range.
+- P9-P12: RANDOM NOTE DENSITY + percentage.
+- P13: RANDOM NOTE GENERATOR BIAS, with arrow toward P14.
+- P14: BIAS PERCENTAGE, with current percentage/OFF.
+
+PRESERVED
+---------
+- V0.45.4 probability values remain rounded to 10% increments.
+- V0.45.3 VARIATION playback fix remains intact.
+- Controller Editor mapping remains VARIATION = CC87 / Trigger / 127.
+- No Controller Editor re-import is required when upgrading from V0.45.4.
