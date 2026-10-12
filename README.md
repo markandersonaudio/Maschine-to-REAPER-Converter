@@ -61,6 +61,14 @@ v0.20.5 also reports categories it deliberately **did not attempt** in the compl
 See [`converter/README.md`](converter/README.md) for the current capability matrix, known limitations, reverse-engineering findings, and research directions. The source for the current build is in [`converter/v0.20.5`](converter/v0.20.5).
 This repository is under active development.
 
+### Maschine Tracker for REAPER
+
+The repository now also includes the open-source **Maschine Tracker** project under [`tracker/`](tracker/). The current published build is **V0.45.5**.
+
+It turns Maschine MK3 (with optional Maschine Jam) into a tracker-style hardware sequencer integrated with REAPER, including real-time tracker playback, pattern editing, a song arranger, Variation/randomisation tools, MK3 screen rendering, and hardware LED feedback.
+
+The complete V0.45.5 Lua, JSFX, Python and Controller Editor template sources are published alongside setup, architecture, hardware-mapping, testing and reverse-engineering documentation. See [`tracker/README.md`](tracker/README.md).
+
 ### Internal FX recreation
 
 - [x] **Maschine EQ Unofficial Remake** — Level 2 measured approximation
@@ -87,6 +95,7 @@ Work is also being carried out on:
 Maschine-to-REAPER-Converter/
 |
 +-- converter/                  Main converter work
++-- tracker/                    Maschine MK3/Jam tracker for REAPER
 +-- plugins/                    Replacement plug-ins for Maschine-native devices
 |   +-- MaschineEQ/             First completed internal-FX recreation
 +-- research/                   Reverse-engineering notes and experiments
@@ -146,5 +155,7 @@ Maschine and Native Instruments are names and trademarks associated with Native 
 There is intentionally no single blanket licence covering every future component of this repository.
 
 Individual components may have their own licence depending on their dependencies and implementation. See [`LICENSES/README.md`](LICENSES/README.md) and the licence file inside each component directory.
+
+The project-authored Maschine Tracker code and documentation under `tracker/` are released under the MIT License; see [`tracker/LICENSE`](tracker/LICENSE).
 
 The JUCE-based Maschine EQ subproject is intended to be distributed under terms compatible with the JUCE open-source licence used to build it.
