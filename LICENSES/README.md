@@ -23,6 +23,12 @@ The original Python converter code and support scripts under `converter/` are re
 
 This component licence does not grant rights to third-party plug-ins, content, trademarks, presets, binaries, captured host state, or other proprietary material.
 
+## Maschine Tracker
+
+The project-authored Lua, JSFX, Python and documentation under `tracker/` are released under the **MIT License**. See `tracker/LICENSE`.
+
+The included `.ncm3` and `.ncmj` files are user-created Native Instruments Controller Editor configuration templates. The MIT licence does not grant rights to Native Instruments software, firmware, hardware designs, trademarks, artwork, presets, or other third-party material.
+
 ## Future converter components
 
 Other non-JUCE converter components may use a different licence where appropriate. Their directories should contain an explicit licence or notice before public release.
