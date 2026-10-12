@@ -1,0 +1,44 @@
+MASCHINE AUTOMATION ROUTE PROFILE FORMAT — AB04
+=================================================
+
+File name:
+  Maschine_Automation_Route_Profiles.json
+
+Purpose:
+  Store user-verified alternate automation destinations such as MIDI CC without
+  adding plug-in/preset special cases to the converter source.
+
+Each profile contains:
+- profile_id
+- plugin_class_id
+- probe_signature
+    start_index
+    parameter_names
+- bindings[]
+    native_vst3_parameter_id
+    parameter_name
+    route
+    cc_number
+    value_mapping (optional)
+- verification metadata
+
+Matching rule:
+- the destination VST3 class must match;
+- the converter must have exactly one identity probe matching the current
+  destination track;
+- the probe parameter-name signature must match exactly;
+- the target lane must resolve to the binding's native VST3 parameter identity.
+
+The converter does NOT use the raw MXPRJ target ID as the durable route key and
+does NOT guess MIDI CC numbers.
+
+Current verified example:
+  Kontakt 7 / Amazing Organ
+  signature parameters 0..7:
+    Blend AB, Sustain, Release, Cutoff,
+    Reverb, BitCrusher, Repeater, Level
+
+  Sustain:
+    native VST3 ID 1
+    route MIDI CC
+    CC 14
