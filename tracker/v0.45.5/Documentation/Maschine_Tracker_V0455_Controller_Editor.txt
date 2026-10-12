@@ -1,0 +1,66 @@
+MASCHINE TRACKER V0.45.5 - CONTROLLER EDITOR NOTES
+================================================
+
+MK3 VARIATION
+VARIATION = CC87
+Behavior: Trigger
+Value: 127
+LED: For MIDI In
+
+Press VARIATION once to expose the V0.45.5 16-pad Variation layout.
+Press VARIATION again to return to normal tracker pads.
+
+MK3 EVENTS
+EVENTS = CC85
+V0.45.5: reserved / no tracker action.
+The MIDI Engine consumes it so the CC is not passed into an instrument.
+
+MK3 TOP BUTTONS - NORMAL TRACKER
+1  PREV 8
+2  NEXT 8
+3  CMD PREV
+4  CMD NEXT
+5  UNUSED outside ARRANGER
+6  DEFAULT CURRENT STEP
+7  CLEAR STEP
+8  CLEAR PATTERN
+
+FOLLOW + Top 6 = DEFAULT CURRENT PATTERN
+Preserves NOTE values; resets VEL 100 / LEN 1 / PRB 100 / CMD OFF / VAL 0.
+
+MK3 TOP BUTTONS - ARRANGER
+1  ARR BACK
+2  ARR FORWARD
+3  COPY CELL
+4  PASTE CELL
+5  DUPLICATE CELL
+6  INSERT REST
+7  CLEAR CELL
+8  CLEAR TRACK ARRANGEMENT
+
+FOLLOW + Top 1 = Arranger zoom out
+FOLLOW + Top 2 = Arranger zoom in
+
+4-D ENCODER IN ARRANGER
+HORIZONTAL: Left/Right = musical-time previous/next cell; Up/Down = track.
+VERTICAL:   Left/Right = track; Up/Down = musical-time previous/next cell.
+Changing track preserves the V0.45.5 musical-time cursor.
+4-D PUSH = enter/exit CELL EDIT.
+4-D TURN while CELL EDIT = EMPTY / REST / created Patterns.
+
+VARIATION PAD LAYOUT
+P1-P4   Probability
+P5-P8   Velocity
+P9-P12  Note generation / density
+P13     Bias mode
+P14     Bias weight
+P15-P16 Octave span down/up
+
+MK3 PAD LED REGRESSION RULE
+Every Pad1-Pad16 on all 8 pad pages must use behavior=gate with NO onIfDown attribute.
+Every Pad#IDX LED must remain under display type=0 with unit color-mode=3.
+This is what Controller Editor shows as For MIDI In + Indexed.
+
+MASCHINE JAM
+Jam mappings/templates are retained from V0.44.
+Physical D-pad remains Up=CC21, Left=CC22, Right=CC23, Down=CC24.
