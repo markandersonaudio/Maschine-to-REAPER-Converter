@@ -1,0 +1,417 @@
+desc:Maschine Tracker MK3 LED Bridge V0.45.5
+
+in_pin:none
+out_pin:none
+options:gmem=MaschineTrackerV06
+
+@init
+
+ext_noinit = 1;
+
+// ============================================================
+// MASCHINE TRACKER MK3 LED FEEDBACK V0.45.5
+//
+// Controller Editor rule:
+//   TOGGLE / MODE buttons = Trigger + For MIDI In
+//   FOLLOW modifier       = Gate + For MIDI In
+//   ONE-SHOT actions      = Trigger + For MIDI In
+//
+// LED language:
+//   dark  = inactive
+//   solid = active state
+//   flash = one-shot action
+//
+// V0.32:
+//   Group A-H MUST use Color Mode = Indexed.
+//   Index 0 is used for true OFF; each selected bank receives its
+//   own bright indexed colour instead of the generic value 127.
+//
+// Put this JSFX on the dedicated MK3 LED feedback track and set:
+//   MIDI Input           = None
+//   MIDI Hardware Output = Maschine MK3
+// ============================================================
+
+PATTERN_MODE_GMEM = 15051;
+PATTERN_SELECT_MODE_GMEM = 15057;
+BROWSER_MODE_GMEM = 15058;
+MK3_PAGE_GMEM = 15052;
+TEMPO_MODE_GMEM = 15054;
+ARRANGER_MODE_GMEM = 15055;
+VISUALIZER_MODE_GMEM = 15210;
+VARIATION_MODE_GMEM = 15213;
+
+PAD_MODE_GMEM = 15062;
+JAM_SELECT_MODE_GMEM = 15063;
+FOLLOW_MOD_GMEM = 15065;
+LOCK_STEP_GMEM = 15066;
+FIXED_VEL_GMEM = 15067;
+INST_LOCK_GMEM = 15068;
+SETTINGS_HELD_GMEM = 15069;
+NOTES_MODE_GMEM = 15200;
+SENSITIVITY_MODE_GMEM = 15201;
+SCALE_LOCK_GMEM = 15202;
+SCALE_EDIT_GMEM = 15203;
+CURRENT_TRACK_GMEM = 15040;
+TRACK_PATTERN_LENGTH_BASE = 15100;
+TRACK_MUTE_BASE = 15000;
+TRACK_SOLO_BASE = 15070;
+
+MK3_LED_PULSE_BASE = 15400;
+MK3_PAD_LED_BASE = 15600;
+
+// Bright Indexed values for A-H.
+// These mirror the first eight tracker colour identities.
+BANK_LED_A = 6;   // Red
+BANK_LED_B = 38;  // Cyan
+BANK_LED_C = 22;  // Yellow
+BANK_LED_D = 54;  // Violet
+BANK_LED_E = 30;  // Green
+BANK_LED_F = 62;  // Pink
+BANK_LED_G = 46;  // Blue
+BANK_LED_H = 10;  // Orange
+
+CC_CACHE_BASE = 2000;
+PULSE_CACHE_BASE = 2200;
+FLASH_REMAIN_BASE = 2400;
+PAD_CACHE_BASE = 2600;
+
+init_cc = 0;
+
+while(init_cc < 128)
+(
+  CC_CACHE_BASE[init_cc] = -1;
+  PULSE_CACHE_BASE[init_cc] =
+    gmem[
+      MK3_LED_PULSE_BASE
+      +
+      init_cc
+    ];
+  FLASH_REMAIN_BASE[init_cc] = 0;
+  init_cc += 1;
+);
+
+pad_init = 0;
+while(pad_init < 16)
+(
+  PAD_CACHE_BASE[pad_init] = -1;
+  pad_init += 1;
+);
+
+
+function is_action_cc(cc)
+(
+  cc == 22
+  ||
+  cc == 23
+  ||
+  cc == 24
+  ||
+  cc == 25
+  ||
+  cc == 26
+  ||
+  cc == 27
+  ||
+  cc == 28
+  ||
+  cc == 29
+  ||
+  cc == 53
+  ||
+  cc == 85
+  ||
+  cc == 88;
+);
+
+
+function is_managed_cc(cc)
+(
+  is_action_cc(cc)
+  ||
+  cc == 36
+  ||
+  cc == 38
+  ||
+  cc == 41
+  ||
+  cc == 42
+  ||
+  cc == 43
+  ||
+  cc == 44
+  ||
+  cc == 47
+
+  ||
+  cc == 56
+  ||
+  cc == 57
+  ||
+  cc == 59
+  ||
+  cc == 80
+  ||
+  cc == 81
+  ||
+  cc == 82
+  ||
+  cc == 83
+  ||
+  cc == 84
+  ||
+  cc == 86
+  ||
+  cc == 87
+  ||
+  cc == 90
+  ||
+  (
+    cc >= 98
+    &&
+    cc <= 105
+  );
+);
+
+
+function bank_led_value(bank)
+(
+  bank == 0 ? BANK_LED_A :
+  bank == 1 ? BANK_LED_B :
+  bank == 2 ? BANK_LED_C :
+  bank == 3 ? BANK_LED_D :
+  bank == 4 ? BANK_LED_E :
+  bank == 5 ? BANK_LED_F :
+  bank == 6 ? BANK_LED_G :
+  bank == 7 ? BANK_LED_H :
+  0;
+);
+
+
+function mode_led_value(cc)
+local(selected_bank, selected_track)
+(
+  cc == 36 ?
+  (
+    (gmem[BROWSER_MODE_GMEM] > 0 || gmem[VISUALIZER_MODE_GMEM] > 0) ? 127 : 0;
+  )
+  :
+  cc == 38 ?
+  (
+    gmem[ARRANGER_MODE_GMEM] > 0 ? 127 : 0;
+  )
+  :
+  cc == 42 ?
+  (
+    selected_track = floor(gmem[CURRENT_TRACK_GMEM]) - 1;
+    selected_track < 0 ? selected_track = 0;
+    selected_track > 15 ? selected_track = 15;
+    gmem[TRACK_MUTE_BASE + selected_track] > 0 ? 127 : 0;
+  )
+  :
+  cc == 43 ?
+  (
+    selected_track = floor(gmem[CURRENT_TRACK_GMEM]) - 1;
+    selected_track < 0 ? selected_track = 0;
+    selected_track > 15 ? selected_track = 15;
+    gmem[TRACK_SOLO_BASE + selected_track] > 0 ? 127 : 0;
+  )
+  :
+  cc == 44 ?
+  (
+    gmem[SENSITIVITY_MODE_GMEM] > 0 ? 127 : 0;
+  )
+  :
+  cc == 47 ?
+  (
+    gmem[TEMPO_MODE_GMEM] > 0 ? 127 : 0;
+  )
+  :
+  cc == 41 ?
+  (
+    gmem[SETTINGS_HELD_GMEM] > 0 ? 127 : 0;
+  )
+  :
+  cc == 56 ?
+  (
+    gmem[FOLLOW_MOD_GMEM] > 0 ? 127 : 0;
+  )
+  :
+  cc == 57 ?
+  (
+    gmem[0] > 0 ? 127 : 0;
+  )
+  :
+  cc == 59 ?
+  (
+    gmem[0] > 0 ? 0 : 127;
+  )
+  :
+  cc == 80 ?
+  (
+    gmem[FIXED_VEL_GMEM] > 0 ? 127 : 0;
+  )
+  :
+  cc == 81 ?
+  (
+    gmem[PAD_MODE_GMEM] > 0 ? 127 : 0;
+  )
+  :
+  cc == 82 ?
+  (
+    gmem[SCALE_EDIT_GMEM] > 0 ? 127 : 0;
+  )
+  :
+  cc == 83 ?
+  (
+    gmem[LOCK_STEP_GMEM] > 0 ? 127 : 0;
+  )
+  :
+  cc == 84 ?
+  (
+    gmem[INST_LOCK_GMEM] > 0 ? 127 : 0;
+  )
+  :
+  cc == 86 ?
+  (
+    (gmem[PATTERN_MODE_GMEM] > 0 || gmem[PATTERN_SELECT_MODE_GMEM] > 0) ? 127 : 0;
+  )
+  :
+  cc == 87 ?
+  (
+    gmem[VARIATION_MODE_GMEM] > 0 ? 127 : 0;
+  )
+  :
+  cc == 90 ?
+  (
+    gmem[JAM_SELECT_MODE_GMEM] > 0 ? 127 : 0;
+  )
+  :
+  (
+    cc >= 98
+    &&
+    cc <= 105
+  ) ?
+  (
+    selected_bank =
+      floor(
+        gmem[
+          MK3_PAGE_GMEM
+        ]
+      );
+
+    selected_bank < 0 ? selected_bank = 0;
+    selected_bank > 7 ? selected_bank = 7;
+
+    cc - 98 == selected_bank
+    ?
+    bank_led_value(
+      selected_bank
+    )
+    :
+    0;
+  )
+  :
+  0;
+);
+
+
+@block
+
+// Lua owns all Pad 1-16 colours in V0.45.5. The values are Native
+// Instruments Indexed colour values, allowing normal track colours and
+// special-mode overlays to use the same feedback path.
+pad_index = 0;
+while(pad_index < 16)
+(
+  desired_pad_led = floor(gmem[MK3_PAD_LED_BASE + pad_index]);
+  desired_pad_led < 0 ? desired_pad_led = 0;
+  desired_pad_led > 127 ? desired_pad_led = 127;
+
+  desired_pad_led != PAD_CACHE_BASE[pad_index] ?
+  (
+    midisend(0, 0x90, 12 + pad_index, desired_pad_led);
+    PAD_CACHE_BASE[pad_index] = desired_pad_led;
+  );
+
+  pad_index += 1;
+);
+
+cc = 0;
+
+while(cc < 128)
+(
+  is_managed_cc(cc) ?
+  (
+    is_action_cc(cc) ?
+    (
+      pulse_value =
+        gmem[
+          MK3_LED_PULSE_BASE
+          +
+          cc
+        ];
+
+      pulse_value !=
+        PULSE_CACHE_BASE[
+          cc
+        ] ?
+      (
+        PULSE_CACHE_BASE[cc] =
+          pulse_value;
+
+        FLASH_REMAIN_BASE[cc] =
+          max(
+            1,
+            floor(
+              srate
+              *
+              0.10
+            )
+          );
+      );
+
+      desired =
+        FLASH_REMAIN_BASE[cc] > 0
+        ?
+        127
+        :
+        0;
+
+      FLASH_REMAIN_BASE[cc] > 0 ?
+      (
+        FLASH_REMAIN_BASE[cc] -=
+          samplesblock;
+
+        FLASH_REMAIN_BASE[cc] < 0 ?
+        (
+          FLASH_REMAIN_BASE[cc] = 0;
+        );
+      );
+    )
+    :
+    (
+      desired =
+        mode_led_value(
+          cc
+        );
+    );
+
+    desired !=
+      CC_CACHE_BASE[
+        cc
+      ] ?
+    (
+      midisend(
+        0,
+        0xB0,
+        cc,
+        desired
+      );
+
+      CC_CACHE_BASE[cc] =
+        desired;
+    );
+  );
+
+  cc += 1;
+);
