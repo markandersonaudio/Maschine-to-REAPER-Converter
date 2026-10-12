@@ -1,0 +1,104 @@
+MASCHINE -> REAPER CONVERTER v0.20.5
+=====================================
+
+STATUS
+------
+v0.20.5 is the current testable mainline build.
+
+The conversion engine is intentionally based on the user-validated v0.20.4
+mainline. v0.20.5 adds conversion-scope transparency for testing larger and
+more complex MXPRJ files; it does not add experimental Maschine-Sampler host
+automation work or the later real-time capture experiments to the stable engine.
+
+NEW IN v0.20.5
+--------------
+1. The completion dialog now contains a scrollable section titled:
+
+     NOT ATTEMPTED BY THIS BUILD
+
+   This makes it explicit which major project categories the converter did not
+   try to reconstruct.
+
+2. The same NOT ATTEMPTED list is written into the main conversion log.
+
+3. The generated .automation.json report now contains a top-level
+   "not_attempted" section, so the omissions are preserved with the converted
+   project for later analysis.
+
+4. Diagnostic-only external VST3-FX detection was added. If VST3 effects are
+   present in the MXPRJ, the completion dialog marks them [DETECTED], reports
+   how many were found, and lists their plug-in names where available.
+
+   This detector is informational only. It does not alter RPP generation.
+
+5. The suggested output filename now uses the current suffix:
+
+     _v0205.rpp
+
+NOT ATTEMPTED / OUTSIDE CURRENT STABLE SCOPE
+---------------------------------------------
+The completion dialog reports the following current exclusions:
+
+- External VST3 insert / Group / Master effect chains.
+- Maschine-native instruments other than the Sampler, such as Drum Synth and
+  Bass Synth.
+- Maschine-native Sound / Group / Master insert effects.
+- Perform FX device/touch-strip reconstruction.
+- Audio Clips / audio-loop arrangement content as REAPER media items.
+- Clip automation.
+- Advanced Maschine Sampler slice/chop and general multi-zone reconstruction;
+  the stable Sampler route remains the proven one-zone field transfer.
+- General mixer state, sends, sidechains and arbitrary routing beyond the
+  converter's validated/default routing behavior and the one specifically
+  recognized routing profile.
+- Maschine Host/Auto automation assignments.
+- Non-VST3 external plug-ins such as VST2.
+
+IMPORTANT
+---------
+"Not attempted" means the converter deliberately did not reconstruct that
+category. It does not mean the conversion failed.
+
+Automation lanes that the converter does inspect but cannot safely bind are a
+different case: the existing conservative automation/carrier behavior from
+v0.20.4 remains unchanged.
+
+RETAINED FROM v0.20.4
+---------------------
+- Dynamic serialization family support for NoteEvent / EventList / Pattern /
+  Scene / Scene-slot / Section families already supported by v0.20.4.
+- Mixed note + FloatModulationEvent EventLists.
+- 15-Sampler reconstruction path and currently proven Sampler fields.
+- Native external VST3 instrument state restoration.
+- Komplete Kontrol-hosted Massive restoration and parameter translation.
+- Pattern-local automation repetition and Pattern boundary handling.
+- Direct VST3 automation mapping via exact native parameter identities/probes.
+- Validated alternate automation route profiles.
+- Conservative unresolved automation handling; no guessed parameter bindings.
+
+SMOKE CHECKS FOR v0.20.5
+------------------------
+- Python source compiles successfully with the standard library only.
+- The original v0.20.4 VST3 instrument scanner returns identical instrument
+  results in the v0.20.5 source for the controlled FX-chain project.
+- New diagnostic scanner correctly identifies the five external VST3 effects
+  in the controlled FX-chain project:
+    Choral
+    Solid EQ
+    Solid Dynamics
+    Solid Bus Comp
+    Transient Master
+- Diagnostic changes do not write or modify conversion output tracks.
+
+SUPPORT FILES
+-------------
+The v0.20.5 package includes:
+- Maschine_Converter_v0205.py
+- Maschine_Converter_v0205.pyw
+- Maschine_Automation_Route_Profiles.json
+- Maschine_Automation_Route_Profile_FORMAT.txt
+- Probe_All_Instrument_Parameter_Identities_AB01.lua
+- Maschine_Automation_Carrier.jsfx
+- Massive Komplete Kontrol host shell
+- bundled Massive native/KK identity probes
+- these v0.20.5 release notes
