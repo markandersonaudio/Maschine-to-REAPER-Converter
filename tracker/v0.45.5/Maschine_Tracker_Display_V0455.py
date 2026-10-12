@@ -997,7 +997,8 @@ def render_tracker(state):
     selected_key_map = {1:"note",2:"velocity",3:"command",4:"parameter",5:"length",6:"probability"}
     focus_key = knob_key_map.get(knob_focus, selected_key_map.get(selected_column,"note"))
     columns = [
-        ("step",8,42,"ST"),        ("note",62,58,"NOTE"),
+        ("step",8,42,"ST"),
+        ("note",62,58,"NOTE"),
         ("length",124,38,"LN"),
         ("velocity",168,48,"VEL"),
         ("probability",222,54,"PRB"),
