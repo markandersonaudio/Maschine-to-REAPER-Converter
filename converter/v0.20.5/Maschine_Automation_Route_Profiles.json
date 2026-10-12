@@ -1,0 +1,37 @@
+{
+  "format_version": 1,
+  "description": "Verified Maschine/NKS automation destination routes. Profiles are matched by VST3 class and a track-specific parameter-name signature; raw MXPRJ target IDs and REAPER track names are not persistent mapping keys.",
+  "profiles": [
+    {
+      "profile_id": "kontakt7_amazing_organ_controls_v1",
+      "plugin_class_id": "5653544E694B376B6F6E74616B742037",
+      "probe_signature": {
+        "start_index": 0,
+        "parameter_names": [
+          "Blend AB",
+          "Sustain",
+          "Release",
+          "Cutoff",
+          "Reverb",
+          "BitCrusher",
+          "Repeater",
+          "Level"
+        ]
+      },
+      "bindings": [
+        {
+          "native_vst3_parameter_id": 1,
+          "parameter_name": "Sustain",
+          "route": "midi_cc",
+          "cc_number": 14,
+          "value_mapping": "centered_signed_7bit"
+        }
+      ],
+      "verification": {
+        "status": "user_confirmed",
+        "date": "2026-09-23",
+        "evidence": "Amazing Organ Sustain was observed assigned to MIDI CC14 in Kontakt; AB03 CC14 export correctly replicated the Maschine automation."
+      }
+    }
+  ]
+}
