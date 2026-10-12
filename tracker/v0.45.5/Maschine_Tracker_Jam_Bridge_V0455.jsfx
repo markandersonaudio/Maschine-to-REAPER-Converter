@@ -1,0 +1,993 @@
+desc:Maschine Tracker Jam Bridge V0.45.5
+
+in_pin:none
+out_pin:none
+options:gmem=MaschineTrackerV06
+
+@init
+ext_noinit = 1;
+
+// ============================================================
+// MASCHINE JAM TRACKER BRIDGE
+//
+// GRID = ONE TRACK / ALL 64 STEPS
+//
+// Column 1: Steps  1-8  top to bottom
+// Column 2: Steps  9-16 top to bottom
+// Column 3: Steps 17-24
+// Column 4: Steps 25-32
+// Column 5: Steps 33-40
+// Column 6: Steps 41-48
+// Column 7: Steps 49-56
+// Column 8: Steps 57-64
+//
+// Recommended Controller Editor assignments:
+//
+// Matrix buttons   = MIDI Notes 0..63  (existing working mapping)
+// Scene 1..8       = MIDI Notes 64..71
+// Group A..H       = MIDI Notes 72..79
+// Touch strips 1-8 = CC48..55, Absolute, 0..127
+//
+// Song button      = CC16, Trigger value 127
+// Select button    = CC17, Trigger value 127
+// Mute button      = CC18, Trigger value 127
+// Solo button      = CC19, Trigger value 127
+// Duplicate button = CC20, Trigger value 127
+// D-pad Left       = CC22, Trigger value 127
+// D-pad Right      = CC23, Trigger value 127
+//
+// CC16 is now reserved for the Track Bank 1-8 / 9-16 toggle.
+// Scene selection should use the recommended Notes 64..71.
+//
+// IMPORTANT:
+// Disable Matrix Pages so Scene 1..8 send MIDI.
+// Disable Touch Strip Pages so A..H send MIDI.
+// ============================================================
+
+
+// ============================================================
+// JAM -> LUA EVENT QUEUE
+//
+// 1 = matrix step select
+//     a = step 1..64
+//     b = physical column 1..8
+//     c = physical row from top 1..8
+//
+// 2 = select track
+//     a = track 1..8
+//
+// 3 = A-H group button pressed
+//     a = physical button 1..8
+//     Lua applies either Mute or Solo according to current group mode
+//
+// 4 = touch-strip edit value
+//     a = physical strip 1..8
+//     b = value 0..127
+//
+// 5 = toggle Jam track bank
+//     Bank 1 = Tracks 1..8
+//     Bank 2 = Tracks 9..16
+//
+// 6 = toggle Jam matrix Select / Note-Edit mode
+//
+// 7 = set A-H button function
+//     a=0 Mute mode
+//     a=1 Solo mode
+//
+// 8 = resize current selected track pattern
+//     a=+1 Duplicate/double
+//     a=-1 FOLLOW + Duplicate / halve
+//
+// 9 = Jam 64-step matrix bank
+//     a=-1 previous 64 steps
+//     a=+1 next 64 steps
+// 10 = toggle Direct Note mode
+// 11 = toggle Direct Note audition
+// 12 = Direct Note A-H press/release: a=1..8, b=0/1
+// 13 = Direct Note octave / Length Touch range: Down=-1, Up=+1
+// 14 = set touch edit mode: a=1 velocity, 2 probability, 3 length
+// 15 = FOLLOW+MUTE clear all mutes
+// 16 = FOLLOW+SOLO clear all solos
+// 17 = clear touch values: a=0 visible 8 steps, a=1 whole current track
+// ============================================================
+
+JAM_WRITE = 13000;
+JAM_READ = 13001;
+JAM_HEARTBEAT = 13002;
+
+JAM_BASE = 13010;
+JAM_STRIDE = 4;
+JAM_SLOTS = 64;
+
+
+// ============================================================
+// FEEDBACK / MIXER GMEM
+// ============================================================
+
+JAM_LED_BASE = 14000;
+JAM_LED_COUNT = 64;
+
+JAM_SCENE_LED_BASE = 14080;
+JAM_GROUP_LED_BASE = 14090;
+
+TRACK_MUTE_BASE = 15000;
+TRACK_VOLUME_BASE = 15020;
+TRACK_SOLO_BASE = 15070;
+
+JAM_TRACK_BANK_GMEM = 15060;
+JAM_STEP_BANK_GMEM = 15061;
+JAM_SELECT_MODE_GMEM = 15063;
+JAM_GROUP_MODE_GMEM = 15064;
+FOLLOW_MOD_GMEM = 15065;
+ANY_SOLO_GMEM = 15086;
+
+JAM_DIRECT_NOTE_GMEM = 15204;
+JAM_DIRECT_AUDITION_GMEM = 15205;
+JAM_TOUCH_MODE_GMEM = 15206;
+ANY_MUTE_GMEM = 15208;
+JAM_STRIP_LED_BASE = 14120;
+
+
+// ============================================================
+// MIDI MAPPING
+// ============================================================
+
+MATRIX_NOTE_BASE = 0;
+MATRIX_NOTE_COUNT = 64;
+
+SCENE_NOTE_BASE = 64;
+GROUP_NOTE_BASE = 72;
+
+SONG_CC = 16;
+SELECT_CC = 17;
+MUTE_MODE_CC = 18;
+SOLO_MODE_CC = 19;
+DUPLICATE_CC = 20;
+STEP_BANK_LEFT_CC = 22;
+STEP_BANK_RIGHT_CC = 23;
+
+// Additional V0.45.5 edit/performance controls.
+DIRECT_NOTE_CC = 33;       // physical NOTES button
+NOTE_REPEAT_CC = 25;       // NOTE REPEAT / ARP
+LEVEL_CC = 27;             // Velocity Touch
+AUX_CC = 28;               // Length Touch
+CONTROL_CC = 29;           // Probability Touch
+MACRO_CC = 26;             // UNUSED in V0.45.5
+CLEAR_CC = 35;             // Touch-mode reset (moved off conflicting old CC19)
+DPAD_UP_CC = 21;
+DPAD_DOWN_CC = 24;
+
+TOUCHSTRIP_CC_BASE = 48;
+
+
+// ============================================================
+// LED CACHE
+// ============================================================
+
+jam_led_channel = 0;
+song_led_cache = -1;
+select_led_cache = -1;
+mute_mode_led_cache = -1;
+solo_mode_led_cache = -1;
+duplicate_led_cache = -1;
+duplicate_flash_remaining = 0;
+left_arrow_led_cache = -1;
+right_arrow_led_cache = -1;
+left_arrow_flash_remaining = 0;
+right_arrow_flash_remaining = 0;
+direct_note_led_cache = -1;
+note_repeat_led_cache = -1;
+level_led_cache = -1;
+aux_led_cache = -1;
+control_led_cache = -1;
+macro_led_cache = -1;
+clear_led_cache = -1;
+clear_flash_remaining = 0;
+
+// Gate-mode touch buttons let a held mode button modify CLEAR without
+// immediately toggling the mode off.
+touch_button_held_mode = 0;
+touch_exit_pending = 0;
+touch_clear_chord_used = 0;
+pulse_counter = 0;
+
+MATRIX_CACHE_BASE = 2000;
+SCENE_CACHE_BASE = 2100;
+GROUP_CACHE_BASE = 2120;
+STRIP_CACHE_BASE = 2140;
+
+cache_i = 0;
+
+while(cache_i < 64)
+(
+  MATRIX_CACHE_BASE[cache_i] = -1;
+  cache_i += 1;
+);
+
+cache_i = 0;
+
+while(cache_i < 8)
+(
+  SCENE_CACHE_BASE[cache_i] = -1;
+  GROUP_CACHE_BASE[cache_i] = -1;
+  STRIP_CACHE_BASE[cache_i] = -1;
+  cache_i += 1;
+);
+
+
+// ============================================================
+// EVENT QUEUE
+// ============================================================
+
+function push_jam_event(type, a, b, c)
+local(w, r, next, addr)
+(
+  w = floor(gmem[JAM_WRITE]);
+  r = floor(gmem[JAM_READ]);
+
+  next = w + 1;
+  next >= JAM_SLOTS ? next = 0;
+
+  next != r ?
+  (
+    addr =
+      JAM_BASE
+      +
+      w * JAM_STRIDE;
+
+    gmem[addr + 0] = type;
+    gmem[addr + 1] = a;
+    gmem[addr + 2] = b;
+    gmem[addr + 3] = c;
+
+    gmem[JAM_WRITE] = next;
+  );
+);
+
+
+// ============================================================
+// MIDI INPUT
+// ============================================================
+
+@block
+
+gmem[JAM_HEARTBEAT] += 1;
+
+
+while(midirecv(midi_offset, msg1, msg2, msg3))
+(
+  status = msg1 & 0xF0;
+  channel = msg1 & 0x0F;
+  handled = 0;
+
+
+  (
+    status == 0x90
+    ||
+    status == 0x80
+  ) ?
+  (
+    is_note_on =
+      status == 0x90
+      &&
+      msg3 > 0;
+
+
+    // MATRIX NOTES 0..63
+    msg2 >= MATRIX_NOTE_BASE
+    &&
+    msg2 < MATRIX_NOTE_BASE + MATRIX_NOTE_COUNT ?
+    (
+      jam_led_channel = channel;
+
+      is_note_on ?
+      (
+        matrix_note =
+          msg2
+          -
+          MATRIX_NOTE_BASE;
+
+        physical_row_from_bottom =
+          floor(
+            matrix_note
+            /
+            8
+          );
+
+        physical_column =
+          (matrix_note % 8)
+          +
+          1;
+
+        physical_row_from_top =
+          8
+          -
+          physical_row_from_bottom;
+
+        tracker_step =
+          (physical_column - 1)
+          *
+          8
+          +
+          physical_row_from_top;
+
+        push_jam_event(
+          1,
+          tracker_step,
+          physical_column,
+          physical_row_from_top
+        );
+      );
+
+      handled = 1;
+    )
+    :
+
+    // SCENE 1..8 -> TRACK 1..8
+    msg2 >= SCENE_NOTE_BASE
+    &&
+    msg2 < SCENE_NOTE_BASE + 8 ?
+    (
+      jam_led_channel = channel;
+
+      is_note_on ?
+      (
+        push_jam_event(
+          2,
+          msg2 - SCENE_NOTE_BASE + 1,
+          0,
+          0
+        );
+      );
+
+      handled = 1;
+    )
+    :
+
+    // GROUP A..H are normally Mute/Solo track keys. In DIRECT NOTE
+    // they become A-G plus H=sharp and need both press and release.
+    msg2 >= GROUP_NOTE_BASE
+    &&
+    msg2 < GROUP_NOTE_BASE + 8 ?
+    (
+      jam_led_channel = channel;
+
+      gmem[JAM_DIRECT_NOTE_GMEM] > 0 ?
+      (
+        push_jam_event(12, msg2 - GROUP_NOTE_BASE + 1, is_note_on ? 1 : 0, 0);
+      )
+      :
+      (
+        is_note_on ? push_jam_event(3, msg2 - GROUP_NOTE_BASE + 1, 0, 0);
+      );
+
+      handled = 1;
+    );
+  );
+
+
+  status == 0xB0 ?
+  (
+    jam_led_channel = channel;
+
+
+    // TOUCH STRIPS 1..8 -> current tracker touch-edit mode
+    msg2 >= TOUCHSTRIP_CC_BASE
+    &&
+    msg2 < TOUCHSTRIP_CC_BASE + 8 ?
+    (
+      push_jam_event(
+        4,
+        msg2 - TOUCHSTRIP_CC_BASE + 1,
+        msg3,
+        0
+      );
+
+      handled = 1;
+    )
+    :
+
+    // SONG = toggle Jam track bank.
+    // Use Trigger 127 so every physical press creates one toggle.
+    msg2 == SONG_CC ?
+    (
+      msg3 > 0 ?
+      (
+        push_jam_event(
+          5,
+          0,
+          0,
+          0
+        );
+      );
+
+      handled = 1;
+    )
+    :
+
+    // SELECT = same Jam matrix mode toggle as MK3 Select.
+    msg2 == SELECT_CC ?
+    (
+      msg3 > 0 ?
+      (
+        push_jam_event(
+          6,
+          0,
+          0,
+          0
+        );
+      );
+
+      handled = 1;
+    )
+    :
+
+    // MUTE / SOLO: FOLLOW converts either into global clear.
+    msg2 == MUTE_MODE_CC ?
+    (
+      msg3 > 0 ?
+      (
+        gmem[FOLLOW_MOD_GMEM] > 0 ? push_jam_event(15, 0, 0, 0) : push_jam_event(7, 0, 0, 0);
+      );
+      handled = 1;
+    )
+    :
+
+    msg2 == SOLO_MODE_CC ?
+    (
+      msg3 > 0 ?
+      (
+        gmem[FOLLOW_MOD_GMEM] > 0 ? push_jam_event(16, 0, 0, 0) : push_jam_event(7, 1, 0, 0);
+      );
+      handled = 1;
+    )
+    :
+
+    // NOTES = Direct Note toggle.
+    msg2 == DIRECT_NOTE_CC ?
+    (
+      msg3 > 0 ? push_jam_event(10, 0, 0, 0);
+      handled = 1;
+    )
+    :
+
+    // NOTE REPEAT toggles Direct Note audition while Direct Note is on.
+    msg2 == NOTE_REPEAT_CC ?
+    (
+      msg3 > 0 ? push_jam_event(11, 0, 0, 0);
+      handled = 1;
+    )
+    :
+
+    // Four mutually exclusive touch-strip edit modes. These are Gate
+    // messages in the V0.45.5 Jam template. If the current mode button is
+    // pressed while already active, exit is deferred until release so
+    // MODE + CLEAR can reset the whole current track.
+    msg2 == LEVEL_CC ?
+    (
+      msg3 > 0 ?
+      (
+        touch_button_held_mode = 1;
+        touch_clear_chord_used = 0;
+        floor(gmem[JAM_TOUCH_MODE_GMEM]) == 1 ? touch_exit_pending = 1 :
+        (
+          touch_exit_pending = 0;
+          push_jam_event(14, 1, 0, 0);
+        );
+      )
+      :
+      touch_button_held_mode == 1 ?
+      (
+        touch_exit_pending > 0 && touch_clear_chord_used <= 0 ? push_jam_event(14, 1, 0, 0);
+        touch_button_held_mode = 0;
+        touch_exit_pending = 0;
+        touch_clear_chord_used = 0;
+      );
+      handled = 1;
+    )
+    :
+    msg2 == CONTROL_CC ?
+    (
+      msg3 > 0 ?
+      (
+        touch_button_held_mode = 2;
+        touch_clear_chord_used = 0;
+        floor(gmem[JAM_TOUCH_MODE_GMEM]) == 2 ? touch_exit_pending = 1 :
+        (
+          touch_exit_pending = 0;
+          push_jam_event(14, 2, 0, 0);
+        );
+      )
+      :
+      touch_button_held_mode == 2 ?
+      (
+        touch_exit_pending > 0 && touch_clear_chord_used <= 0 ? push_jam_event(14, 2, 0, 0);
+        touch_button_held_mode = 0;
+        touch_exit_pending = 0;
+        touch_clear_chord_used = 0;
+      );
+      handled = 1;
+    )
+    :
+    msg2 == AUX_CC ?
+    (
+      msg3 > 0 ?
+      (
+        touch_button_held_mode = 3;
+        touch_clear_chord_used = 0;
+        floor(gmem[JAM_TOUCH_MODE_GMEM]) == 3 ? touch_exit_pending = 1 :
+        (
+          touch_exit_pending = 0;
+          push_jam_event(14, 3, 0, 0);
+        );
+      )
+      :
+      touch_button_held_mode == 3 ?
+      (
+        touch_exit_pending > 0 && touch_clear_chord_used <= 0 ? push_jam_event(14, 3, 0, 0);
+        touch_button_held_mode = 0;
+        touch_exit_pending = 0;
+        touch_clear_chord_used = 0;
+      );
+      handled = 1;
+    )
+    :
+    msg2 == CLEAR_CC ?
+    (
+      msg3 > 0 ?
+      (
+        touch_mode_for_clear = floor(gmem[JAM_TOUCH_MODE_GMEM]);
+        touch_mode_for_clear > 0 ?
+        (
+          whole_track_clear = touch_button_held_mode == touch_mode_for_clear ? 1 : 0;
+          push_jam_event(17, whole_track_clear, 0, 0);
+          whole_track_clear > 0 ? touch_clear_chord_used = 1;
+          clear_flash_remaining = max(1, floor(srate * 0.10));
+        );
+      );
+      handled = 1;
+    )
+    :
+
+    // D-pad UP/DOWN change Direct Note octave or Length Touch range. LEFT/RIGHT remain free in these modes.
+    msg2 == DPAD_UP_CC ?
+    (
+      msg3 > 0 ? push_jam_event(13, 1, 0, 0);
+      handled = 1;
+    )
+    :
+    msg2 == DPAD_DOWN_CC ?
+    (
+      msg3 > 0 ? push_jam_event(13, -1, 0, 0);
+      handled = 1;
+    )
+    :
+
+    // DUPLICATE:
+    //   normal press doubles/copies the active pattern
+    //   MK3 FOLLOW held + Jam DUPLICATE halves it
+    msg2 == DUPLICATE_CC ?
+    (
+      msg3 > 0 ?
+      (
+        push_jam_event(
+          8,
+          gmem[FOLLOW_MOD_GMEM] > 0 ? -1 : 1,
+          0,
+          0
+        );
+
+        duplicate_flash_remaining = max(1, floor(srate * 0.10));
+      );
+
+      handled = 1;
+    )
+    :
+
+    // Physical D-pad LEFT/RIGHT bank the 8x8 matrix outside Direct Note
+    // and Length Touch. In those two modes LEFT/RIGHT are deliberately free.
+    msg2 == STEP_BANK_LEFT_CC ?
+    (
+      msg3 > 0 && gmem[JAM_DIRECT_NOTE_GMEM] <= 0 && floor(gmem[JAM_TOUCH_MODE_GMEM]) != 3 ?
+      (
+        push_jam_event(9, -1, 0, 0);
+        left_arrow_flash_remaining = max(1, floor(srate * 0.10));
+      );
+      handled = 1;
+    )
+    :
+
+    msg2 == STEP_BANK_RIGHT_CC ?
+    (
+      msg3 > 0 && gmem[JAM_DIRECT_NOTE_GMEM] <= 0 && floor(gmem[JAM_TOUCH_MODE_GMEM]) != 3 ?
+      (
+        push_jam_event(9, 1, 0, 0);
+        right_arrow_flash_remaining = max(1, floor(srate * 0.10));
+      );
+      handled = 1;
+    );
+  );
+
+
+  handled == 0 ?
+  (
+    midisend(
+      midi_offset,
+      msg1,
+      msg2,
+      msg3
+    );
+  );
+);
+
+
+// ============================================================
+// MATRIX LED FEEDBACK
+//
+// gmem 14000 = Step 1
+// ...
+// gmem 14063 = Step 64
+// ============================================================
+
+led_index = 0;
+
+while(led_index < JAM_LED_COUNT)
+(
+  desired_led =
+    floor(
+      gmem[
+        JAM_LED_BASE
+        +
+        led_index
+      ]
+    );
+
+  desired_led < 0 ? desired_led = 0;
+  desired_led > 127 ? desired_led = 127;
+
+  previous_led =
+    MATRIX_CACHE_BASE[
+      led_index
+    ];
+
+  desired_led != previous_led ?
+  (
+    tracker_step =
+      led_index
+      +
+      1;
+
+    physical_column =
+      floor(
+        (tracker_step - 1)
+        /
+        8
+      )
+      +
+      1;
+
+    physical_row_from_top =
+      (
+        (tracker_step - 1)
+        %
+        8
+      )
+      +
+      1;
+
+    physical_row_from_bottom =
+      8
+      -
+      physical_row_from_top;
+
+    led_note =
+      MATRIX_NOTE_BASE
+      +
+      physical_row_from_bottom
+      *
+      8
+      +
+      physical_column
+      -
+      1;
+
+    midisend(
+      0,
+      0x90 | jam_led_channel,
+      led_note,
+      desired_led
+    );
+
+    MATRIX_CACHE_BASE[
+      led_index
+    ] =
+      desired_led;
+  );
+
+  led_index += 1;
+);
+
+
+// ============================================================
+// SCENE / GROUP / TOUCH STRIP FEEDBACK
+// ============================================================
+
+button_i = 0;
+
+while(button_i < 8)
+(
+  desired_scene =
+    floor(
+      gmem[
+        JAM_SCENE_LED_BASE
+        +
+        button_i
+      ]
+    );
+
+  desired_scene < 0 ? desired_scene = 0;
+  desired_scene > 127 ? desired_scene = 127;
+
+  desired_scene !=
+    SCENE_CACHE_BASE[
+      button_i
+    ] ?
+  (
+    midisend(
+      0,
+      0x90 | jam_led_channel,
+      SCENE_NOTE_BASE + button_i,
+      desired_scene
+    );
+
+    SCENE_CACHE_BASE[
+      button_i
+    ] =
+      desired_scene;
+  );
+
+
+  desired_group =
+    floor(
+      gmem[
+        JAM_GROUP_LED_BASE
+        +
+        button_i
+      ]
+    );
+
+  desired_group < 0 ? desired_group = 0;
+  desired_group > 127 ? desired_group = 127;
+
+  desired_group !=
+    GROUP_CACHE_BASE[
+      button_i
+    ] ?
+  (
+    midisend(
+      0,
+      0x90 | jam_led_channel,
+      GROUP_NOTE_BASE + button_i,
+      desired_group
+    );
+
+    GROUP_CACHE_BASE[
+      button_i
+    ] =
+      desired_group;
+  );
+
+
+  desired_volume = floor(gmem[JAM_STRIP_LED_BASE + button_i]);
+
+  desired_volume < 0 ? desired_volume = 0;
+  desired_volume > 127 ? desired_volume = 127;
+
+  desired_volume != STRIP_CACHE_BASE[button_i] ?
+  (
+    midisend(0, 0xB0 | jam_led_channel, TOUCHSTRIP_CC_BASE + button_i, desired_volume);
+    STRIP_CACHE_BASE[button_i] = desired_volume;
+  );
+
+  button_i += 1;
+);
+
+
+// ============================================================
+// SONG BUTTON LED = TRACK BANK
+//
+// Bank 1 (Tracks 1-8)  = off
+// Bank 2 (Tracks 9-16) = on
+// ============================================================
+
+jam_track_bank =
+  floor(
+    gmem[
+      JAM_TRACK_BANK_GMEM
+    ]
+  );
+
+jam_track_bank < 0 ? jam_track_bank = 0;
+jam_track_bank > 1 ? jam_track_bank = 1;
+
+desired_song_led =
+  jam_track_bank > 0
+  ?
+  127
+  :
+  0;
+
+desired_song_led != song_led_cache ?
+(
+  midisend(
+    0,
+    0xB0 | jam_led_channel,
+    SONG_CC,
+    desired_song_led
+  );
+
+  song_led_cache =
+    desired_song_led;
+);
+
+
+// ============================================================
+// SELECT / MUTE / SOLO MODE BUTTON LED FEEDBACK
+// Solid = current Jam group mode. Pulsing = at least one track has
+// that state somewhere. In Direct Note mode A-H are note keys, so
+// bottom MUTE/SOLO become pure global-status indicators.
+// ============================================================
+
+desired_select_led = gmem[JAM_SELECT_MODE_GMEM] > 0 ? 127 : 0;
+
+desired_select_led != select_led_cache ?
+(
+  midisend(0, 0xB0 | jam_led_channel, SELECT_CC, desired_select_led);
+  select_led_cache = desired_select_led;
+);
+
+pulse_counter += samplesblock;
+pulse_period = max(1, floor(srate * 0.25));
+pulse_on = (floor(pulse_counter / pulse_period) % 2) == 0;
+pulse_counter > pulse_period * 8 ? pulse_counter -= pulse_period * 8;
+
+jam_group_mode = floor(gmem[JAM_GROUP_MODE_GMEM]);
+direct_note_mode = gmem[JAM_DIRECT_NOTE_GMEM] > 0;
+any_mute = gmem[ANY_MUTE_GMEM] > 0;
+any_solo = gmem[ANY_SOLO_GMEM] > 0;
+
+desired_mute_mode_led =
+  (!direct_note_mode && jam_group_mode <= 0) ? 127 :
+  (any_mute && pulse_on ? 127 : 0);
+
+desired_solo_mode_led =
+  (!direct_note_mode && jam_group_mode > 0) ? 127 :
+  (any_solo && pulse_on ? 127 : 0);
+
+desired_mute_mode_led != mute_mode_led_cache ?
+(
+  midisend(0, 0xB0 | jam_led_channel, MUTE_MODE_CC, desired_mute_mode_led);
+  mute_mode_led_cache = desired_mute_mode_led;
+);
+
+desired_solo_mode_led != solo_mode_led_cache ?
+(
+  midisend(0, 0xB0 | jam_led_channel, SOLO_MODE_CC, desired_solo_mode_led);
+  solo_mode_led_cache = desired_solo_mode_led;
+);
+
+// New V0.45.5 mode buttons.
+desired_direct_note_led = direct_note_mode ? 127 : 0;
+desired_note_repeat_led = gmem[JAM_DIRECT_AUDITION_GMEM] > 0 ? 127 : 0;
+touch_mode = floor(gmem[JAM_TOUCH_MODE_GMEM]);
+desired_level_led = touch_mode == 1 ? 127 : 0;
+desired_control_led = touch_mode == 2 ? 127 : 0;
+desired_aux_led = touch_mode == 3 ? 127 : 0;
+desired_macro_led = 0;
+
+desired_direct_note_led != direct_note_led_cache ?
+(
+  midisend(0, 0xB0 | jam_led_channel, DIRECT_NOTE_CC, desired_direct_note_led);
+  direct_note_led_cache = desired_direct_note_led;
+);
+desired_note_repeat_led != note_repeat_led_cache ?
+(
+  midisend(0, 0xB0 | jam_led_channel, NOTE_REPEAT_CC, desired_note_repeat_led);
+  note_repeat_led_cache = desired_note_repeat_led;
+);
+desired_level_led != level_led_cache ?
+(
+  midisend(0, 0xB0 | jam_led_channel, LEVEL_CC, desired_level_led);
+  level_led_cache = desired_level_led;
+);
+desired_aux_led != aux_led_cache ?
+(
+  midisend(0, 0xB0 | jam_led_channel, AUX_CC, desired_aux_led);
+  aux_led_cache = desired_aux_led;
+);
+desired_control_led != control_led_cache ?
+(
+  midisend(0, 0xB0 | jam_led_channel, CONTROL_CC, desired_control_led);
+  control_led_cache = desired_control_led;
+);
+macro_led_cache = desired_macro_led;
+
+// CLEAR = one-shot reset confirmation flash.
+desired_clear_led = clear_flash_remaining > 0 ? 127 : 0;
+desired_clear_led != clear_led_cache ?
+(
+  midisend(0, 0xB0 | jam_led_channel, CLEAR_CC, desired_clear_led);
+  clear_led_cache = desired_clear_led;
+);
+clear_flash_remaining > 0 ?
+(
+  clear_flash_remaining -= samplesblock;
+  clear_flash_remaining < 0 ? clear_flash_remaining = 0;
+);
+
+
+// ============================================================
+// DUPLICATE = ONE-SHOT FLASH
+// ============================================================
+
+desired_duplicate_led =
+  duplicate_flash_remaining > 0
+  ?
+  127
+  :
+  0;
+
+desired_duplicate_led != duplicate_led_cache ?
+(
+  midisend(
+    0,
+    0xB0 | jam_led_channel,
+    DUPLICATE_CC,
+    desired_duplicate_led
+  );
+
+  duplicate_led_cache =
+    desired_duplicate_led;
+);
+
+duplicate_flash_remaining > 0 ?
+(
+  duplicate_flash_remaining -= samplesblock;
+
+  duplicate_flash_remaining < 0 ?
+  (
+    duplicate_flash_remaining = 0;
+  );
+);
+
+
+// ============================================================
+// STEP BANK ARROWS = ONE-SHOT FLASH
+// ============================================================
+
+desired_left_arrow_led = left_arrow_flash_remaining > 0 ? 127 : 0;
+desired_right_arrow_led = right_arrow_flash_remaining > 0 ? 127 : 0;
+
+desired_left_arrow_led != left_arrow_led_cache ?
+(
+  midisend(0, 0xB0 | jam_led_channel, STEP_BANK_LEFT_CC, desired_left_arrow_led);
+  left_arrow_led_cache = desired_left_arrow_led;
+);
+
+desired_right_arrow_led != right_arrow_led_cache ?
+(
+  midisend(0, 0xB0 | jam_led_channel, STEP_BANK_RIGHT_CC, desired_right_arrow_led);
+  right_arrow_led_cache = desired_right_arrow_led;
+);
+
+left_arrow_flash_remaining > 0 ?
+(
+  left_arrow_flash_remaining -= samplesblock;
+  left_arrow_flash_remaining < 0 ? left_arrow_flash_remaining = 0;
+);
+
+right_arrow_flash_remaining > 0 ?
+(
+  right_arrow_flash_remaining -= samplesblock;
+  right_arrow_flash_remaining < 0 ? right_arrow_flash_remaining = 0;
+);
