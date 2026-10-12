@@ -1,0 +1,71 @@
+MASCHINE TRACKER V0.45.5 - HARDWARE TEST CHECKLIST
+================================================
+
+A. LOAD / COMPILE
+[ ] Import V0.45.5 MK3 template.
+[ ] Import V0.45.5 Jam template if used.
+[ ] Compile/load all three V0.45.5 JSFX files in REAPER.
+[ ] Run V0.45.5 Lua and Display companion.
+
+B. ARRANGER MUSICAL-TIME CURSOR
+[ ] T1: arrange an 8-step Pattern followed by more material.
+[ ] T2: arrange a 16-step Pattern followed by more material.
+[ ] Navigate to a later point on T1, then change to T2.
+[ ] The cursor remains at the same musical time, even though the selected cell number differs.
+[ ] Repeat with 32-step Patterns and explicit REST/EMPTY cells.
+[ ] Move to a track with no material at that time: a selected EMPTY appears at the same time.
+[ ] Place a Pattern there: it starts exactly at that time.
+[ ] After placement, the cursor advances to the exact end of the placed Pattern.
+[ ] During playback, mixed pattern lengths remain phase-safe as in V0.44.
+
+C. LATCHED VARIATION MODE
+[ ] Press VARIATION once: button LED stays lit and right screen changes to VARIATION.
+[ ] Release VARIATION: mode stays active; press VARIATION again and normal pad mode returns.
+[ ] Pads 1-4 randomize Probability in the documented ranges.
+[ ] Repeated P1-P4 tests produce only multiples of 10% (0,10,...,100).
+[ ] Pads 3-4 change only NOTE-bearing active steps.
+[ ] Pads 5-8 randomize Velocity in the documented ranges.
+[ ] Pads 7-8 change only NOTE-bearing active steps.
+[ ] P9/P10/P11/P12 regenerate at approximately 25/50/75/100% density.
+[ ] Generated notes use VEL100 / LEN1 / PRB100 / CMD OFF / VAL0.
+[ ] One Undo restores the whole pre-generation Pattern; Redo reapplies it.
+[ ] Scale Lock ON keeps generated notes in scale; OFF is chromatic.
+[ ] With Bias OFF, P13 and P14 hardware LEDs are both OFF.
+[ ] P13 cycles OFF / ROOT-OCT / ROOT+5TH / ROOT+4TH+5TH / OFF.
+[ ] Selecting the first Bias automatically sets Weight to 25% and lights P14.
+[ ] With Bias active, P14 cycles 25 / 50 / 75 / 100 / 25 (never 0%).
+[ ] Cycling P13 back to Bias OFF resets Weight to OFF/0% and turns P14 LED OFF.
+[ ] Pressing P14 while Bias is OFF leaves Weight OFF.
+[ ] Right display shows full RANDOM STEP/PATTERN Probability and Velocity labels.
+[ ] P9-P12 show RANDOM NOTE DENSITY 25/50/75/100%.
+[ ] P13 shows RANDOM NOTE GENERATOR BIAS with an arrow toward P14.
+[ ] P14 shows BIAS PERCENTAGE plus OFF/current percentage.
+[ ] At +100, generated notes come only from the active bias pool where available.
+[ ] P15/P16 keep octave span within 1-2 octaves.
+[ ] Probability, Velocity and Density groups are visibly different colours.
+[ ] EVENTS no longer randomizes Probability and does not leak CC85 to the instrument.
+
+D. FOLLOW + TOP BUTTON 6
+[ ] Put notes with non-default VEL/LEN/PRB/CMD/VAL across the active Pattern.
+[ ] Hold FOLLOW + Top Button 6.
+[ ] Every NOTE is unchanged.
+[ ] All active Pattern non-note values become VEL100 / LEN1 / PRB100 / CMD OFF / VAL0.
+[ ] One Undo restores the whole previous Pattern state; Redo reapplies the reset.
+[ ] Top Button 6 alone still resets only the current step.
+[ ] In ARRANGER, Top Button 6 still inserts a REST.
+
+E. DISPLAY
+[ ] Normal right-screen 4x4 pad boxes are visibly taller and remain aligned.
+[ ] Selected-note information remains readable with no overlap.
+[ ] VARIATION right screen shows all 16 functions.
+[ ] HORIZONTAL Arranger highlights the cell at the shared musical-time cursor.
+[ ] VERTICAL Arranger highlights the cell at the shared musical-time cursor.
+[ ] Arranger detail screen reports the musical edit tick.
+
+F. V0.44 REGRESSION
+[ ] Pattern/REST/EMPTY clear behavior is unchanged.
+[ ] Arranger Undo/Redo, copy, paste, duplicate and zoom still work.
+[ ] LOOP SONG and TRUE SONG still work.
+[ ] Normal pattern playback still loops.
+[ ] Jam navigation, mute/solo, touch modes and LEDs still work.
+[ ] All MK3 pad pages still receive For MIDI In + Indexed LED feedback.
