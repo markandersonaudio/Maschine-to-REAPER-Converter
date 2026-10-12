@@ -1,0 +1,3078 @@
+desc:Maschine Tracker MIDI Engine V0.45.5
+
+in_pin:none
+out_pin:none
+options:gmem=MaschineTrackerV06
+
+@init
+ext_noinit = 1;
+
+CELL_BASE = 20000;
+CELL_SIZE = 7;
+NUM_TRACKS = 16;
+MAX_STEPS = 512;
+
+ACTIVE_DISPLAY_BASE = 80000;
+
+MAX_VOICES = 128;
+VOICE_NOTE_BASE    = 10000;
+VOICE_CHANNEL_BASE = 10200;
+VOICE_REMAIN_BASE  = 10400;
+VOICE_ACTIVE_BASE  = 10600;
+VOICE_TRACK_BASE   = 10800;
+VOICE_STEP_BASE    = 11000;
+
+HW_WRITE  = 12000;
+HW_READ   = 12001;
+HW_BASE   = 12010;
+HW_STRIDE = 4;
+HW_SLOTS  = 64;
+
+// Per-tracker-track mixer state written by the Lua tracker.
+// Mute:   0 = audible, 1 = muted
+// Volume: 0..127, applied as a non-destructive velocity multiplier
+TRACK_MUTE_BASE   = 15000;
+TRACK_VOLUME_BASE = 15020;
+
+// V0.29 tracker Solo state.
+// Mute always wins. If ANY_SOLO_GMEM is on, only soloed tracker
+// tracks are allowed to trigger new sequenced notes.
+TRACK_SOLO_BASE = 15070;
+ANY_SOLO_GMEM = 15086;
+
+// CC70-77 are tracker-only in V0.35.
+// The former Tracker/VST knob mode has been removed.
+// gmem 15050 is left unused for backwards compatibility.
+
+// Large encoder mode.
+// 0 = STEP
+// 1 = PATTERN LENGTH
+PATTERN_MODE_GMEM = 15051;
+TEMPO_MODE_GMEM = 15054;
+ARRANGER_MODE_GMEM = 15055;
+SONG_MODE_GMEM = 15056; // 0 LOOP SONG, 1 TRUE SONG
+
+// Explicit MK3 pad-bank selection.
+// V0.23 can use Group A-H as CC98-105 so the selected bank is
+// reported immediately, before a pad is hit.
+MK3_PAGE_GMEM = 15052;
+DIRECT_BANK_MODE_GMEM = 15053;
+
+// V0.28 live-pad / Jam-matrix modes.
+PAD_MODE_GMEM = 15062;
+JAM_SELECT_MODE_GMEM = 15063;
+FOLLOW_MOD_GMEM = 15065;
+
+// V0.31 tracker-owned MK3 LED states.
+LOCK_STEP_GMEM = 15066;
+FIXED_VEL_GMEM = 15067;
+INST_LOCK_GMEM = 15068;
+SETTINGS_HELD_GMEM = 15069;
+
+// V0.45.5 additional MK3/Jam mode state.
+NOTES_MODE_GMEM = 15200;
+SENSITIVITY_MODE_GMEM = 15201;
+SCALE_LOCK_GMEM = 15202;
+SCALE_EDIT_GMEM = 15203;
+JAM_DIRECT_NOTE_GMEM = 15204;
+JAM_DIRECT_AUDITION_GMEM = 15205;
+JAM_TOUCH_MODE_GMEM = 15206;
+LENGTH_TOUCH_RANGE_GMEM = 15207;
+ANY_MUTE_GMEM = 15208;
+TUTORIALS_GMEM = 15209;
+VISUALIZER_MODE_GMEM = 15210;
+VARIATION_MODE_GMEM = 15213;
+
+// Lua publishes the exact live-note mapping for MK3 Pads 1-16 here.
+MK3_PAD_NOTE_MAP_BASE = 15620;
+
+// Lua -> JSFX note-audition request.
+// Increment AUDITION_TRIGGER_GMEM to request a new short preview.
+AUDITION_TRIGGER_GMEM = 15300;
+AUDITION_NOTE_GMEM = 15301;
+AUDITION_VELOCITY_GMEM = 15302;
+AUDITION_CHANNEL_GMEM = 15303;
+AUDITION_GATE_MS_GMEM = 15304;
+RESTART_TRIGGER_GMEM = 15310;
+
+// Jam Direct Note audition requests.
+DIRECT_AUDITION_TRIGGER_GMEM = 15320;
+DIRECT_AUDITION_NOTE_GMEM = 15321;
+DIRECT_AUDITION_VELOCITY_GMEM = 15322;
+DIRECT_AUDITION_CHANNEL_GMEM = 15323;
+DIRECT_AUDITION_ON_GMEM = 15324;
+
+// Action-button pulse counters. Index by MIDI CC number.
+// The MK3 LED Bridge converts counter changes into ~100 ms flashes.
+MK3_LED_PULSE_BASE = 15400;
+
+// Selected tracker track, written by Lua (1..16).
+CURRENT_TRACK_GMEM = 15040;
+
+// Per-track pattern lengths and per-track playback positions.
+TRACK_PATTERN_LENGTH_BASE = 15100;
+TRACK_PLAYSTEP_BASE = 15120;
+TRACK_STEP_DIV_BASE = 15140;
+
+// V0.45.5 per-track pattern slots / song arranger.
+NUM_PATTERNS = 16;
+MAX_ARRANGER_STEPS = 128;
+ARRANGER_EMPTY = -1;
+PATTERN_LENGTH_MATRIX_BASE = 88200;
+PATTERN_DIV_MATRIX_BASE = 88460;
+TRACK_ACTIVE_PATTERN_BASE = 88720;
+TRACK_SELECTED_PATTERN_BASE = 88740;
+ARRANGER_LENGTH_BASE = 88760;
+ARRANGER_PLAY_POS_BASE = 88780;
+MULTI_PATTERN_CELL_BASE = 90000;
+ARRANGER_SEQUENCE_BASE = 951000;
+// V0.45.5 REST cells use sequence value 0 plus per-cell length/division.
+ARRANGER_REST_LENGTH_BASE = 954000;
+ARRANGER_REST_DIV_BASE = 956100;
+TRACK_ACTIVE_REST_BASE = 958200;
+TRACK_PENDING_PATTERN_BASE = 958240;
+ARRANGER_SONG_TICK_GMEM = 958280;
+PATTERN_SELECT_MODE_GMEM = 15057;
+BROWSER_MODE_GMEM = 15058;
+
+// Hardware events:
+// 1  musical pad: a=0..11, b=velocity, c=page
+// 2  step movement: a=-1/+1
+// 4  play
+// 5  stop
+// 6  4-D rotary movement: a=-1/+1
+// 7  Quick/Lock
+// 8  Fixed Velocity
+// 9  clear current step
+// 10 clear current track
+// 11 display bank: a=-1/+1
+// 12 column movement: a=-1/+1
+// 13 MK3 knob 1-8 relative turn: a=1..8, b=-1/+1
+// 15 MK3 knob touch: a=1..8, b=touch value
+// 16 FOLLOW+PATTERN timing hold mode: a=0/1
+// 17 MK3 pad bank: a=0..7 (A..H)
+// 18..20 retired in V0.45.5 (per-step INST removed)
+// 21 Cycle current-step CMD: NONE -> ROLL -> DELAY -> PITCH -> MOD -> SHIFT -> FLAM -> OCT2 -> OCT3 -> OCT4
+// 22 Transpose current note by semitones: a=-12/+12
+// 23 Transpose current pattern by semitones: a=-12/+12
+// 24 Follow/Shift modifier state: a=0/1
+// 25 physical PAD MODE button: toggle NOTE AUDITION
+// 26 Jam Select Mode toggle
+// 27 Resize current pattern: a=+1 duplicate/double, a=-1 halve
+// 28 legacy Random velocity event (retained for compatibility, no longer mapped to VARIATION)
+// 29 legacy Random probability event (retained for compatibility, EVENTS is free in V0.45.5)
+// 30 4-D encoder press: toggle Step Selector / Note Change mode
+// 31 FOLLOW + Pad 1: Undo
+// 32 FOLLOW + Pad 2: Redo
+// 34 SETTINGS + Pad 1-16: preference pad, a=0..15
+// 35 SETTINGS hold state: a=0/1
+// 36 RESTART: jump playback phase to Step 1 and ensure playback is on
+// 37 TEMPO mode toggle
+// 38 MUTE current tracker track
+// 39 SOLO current tracker track
+// 40 SONG ARRANGER toggle
+// 41 PATTERN preset length from Pad 1-8: a=0..7
+// 42 retired in V0.45.5 (standalone NOTES mode removed)
+// 43 NOTE DIVISION preset from PATTERN Pads 9-16: a=0..7
+// 44 Sensitivity Mode state: a=0/1
+// 45 Sensitivity preset: a=0..7
+// 46 FOLLOW+MUTE: clear every tracker mute
+// 47 FOLLOW+SOLO: clear every tracker solo
+// 48 SCALE EDIT state: a=0/1
+// 49 SCALE EDIT Pad 1: toggle Scale Lock
+// 50 FOLLOW+BROWSER: toggle Visualiser Mode
+// 51 Top Button 6 / CC27: reset current-step parameters to defaults
+// 52 Top Button 3 / CC24: cycle CMD backwards
+// 53 PATTERN pad 1-16: create/select Pattern Slot 1-16
+// 54 BROWSER: toggle legacy track overview
+// 55 ARRANGER pad 1-16: set song-sequence pattern at edit cursor
+// 56 PATTERN select hold state: a=0/1
+// 57 ARRANGER 4-D directional navigation: a=dx, b=dy
+// 58 ARRANGER 4-D PUSH: toggle selected-cell edit mode
+// 60 PATTERN select + 4-D PUSH: make selected edit pattern audible at boundary
+// 61 ARRANGER Top 1/2: previous/next arrangement position, a=-1/+1
+// 62 FOLLOW + ARRANGER Top 1/2: zoom out/in, a=-1/+1
+// 63 ARRANGER Top 3: COPY CELL
+// 64 ARRANGER Top 4: PASTE CELL
+// 65 ARRANGER Top 5: DUPLICATE CELL
+// 66 ARRANGER Top 6: INSERT REST
+// 67 FOLLOW + Top Button 6: reset non-note defaults across current active pattern
+// 68 VARIATION hold state: a=0/1
+// 69 VARIATION Pad 1-16: a=0..15
+//
+// Hardware event 1 is extended in V0.28:
+//   a=0..11 in normal tracker-entry mode
+//   a=0..15 in Pad Mode so every MK3 pad can become a live note.
+
+was_playing = 0;
+current_step = 0;
+clock_samples = 0;
+base_tick_samples = 1;
+sixteenth_samples = 1;
+
+// V0.45.5 uses 1/128 note as the master timing quantum. Per-track
+// divisions can therefore range from whole notes through 1/128.
+master_tick_position = 0;
+
+mk3_page = 0;
+mk3_page_pending = 0;
+direct_bank_mode = 0;
+
+pattern_length_mode = 0;
+pattern_select_mode = 0;
+notes_mode = 0;
+sensitivity_mode = 0;
+scale_edit_mode = 0;
+follow_modifier = 0;
+settings_modifier = 0;
+variation_mode = 0;
+
+gmem[PATTERN_MODE_GMEM] = 0;
+gmem[PATTERN_SELECT_MODE_GMEM] = 0;
+gmem[BROWSER_MODE_GMEM] = 0;
+gmem[TEMPO_MODE_GMEM] = 0;
+gmem[ARRANGER_MODE_GMEM] = 0;
+gmem[SONG_MODE_GMEM] = 0;
+gmem[ARRANGER_SONG_TICK_GMEM] = 0;
+gmem[MK3_PAGE_GMEM] = 0;
+gmem[DIRECT_BANK_MODE_GMEM] = 0;
+gmem[PAD_MODE_GMEM] = 0;
+gmem[JAM_SELECT_MODE_GMEM] = 1;
+gmem[FOLLOW_MOD_GMEM] = 0;
+gmem[LOCK_STEP_GMEM] = 0;
+gmem[FIXED_VEL_GMEM] = 0;
+gmem[INST_LOCK_GMEM] = 0;
+gmem[SETTINGS_HELD_GMEM] = 0;
+gmem[NOTES_MODE_GMEM] = 0;
+gmem[SENSITIVITY_MODE_GMEM] = 0;
+gmem[VARIATION_MODE_GMEM] = 0;
+gmem[SCALE_EDIT_GMEM] = 0;
+
+audition_last_trigger =
+  floor(
+    gmem[
+      AUDITION_TRIGGER_GMEM
+    ]
+  );
+
+restart_last_trigger =
+  floor(
+    gmem[
+      RESTART_TRIGGER_GMEM
+    ]
+  );
+
+
+direct_audition_last_trigger = floor(gmem[DIRECT_AUDITION_TRIGGER_GMEM]);
+direct_audition_active = 0;
+direct_audition_note = -1;
+direct_audition_channel = 0;
+
+pulse_init = 0;
+while(pulse_init < 128)
+(
+  gmem[MK3_LED_PULSE_BASE + pulse_init] = 0;
+  pulse_init += 1;
+);
+
+gmem[HW_WRITE] = 0;
+gmem[HW_READ] = 0;
+
+ROLL_ACTIVE_BASE    = 2100;
+ROLL_NOTE_BASE      = 2120;
+ROLL_VELOCITY_BASE  = 2140;
+ROLL_CHANNEL_BASE   = 2160;
+ROLL_TRACKSTEP_BASE = 2180;
+ROLL_REMAIN_BASE    = 2200;
+ROLL_COUNTDOWN_BASE = 2220;
+ROLL_INTERVAL_BASE  = 2240;
+ROLL_GATE_BASE      = 2260;
+ROLL_OCTAVE_COUNT_BASE = 2360;
+ROLL_INDEX_BASE        = 2380;
+TRACK_TICK_REMAIN_BASE = 2420;
+
+// Generic delayed-note queue used by DELAY, SHIFT and FLAM.
+PENDING_MAX = 128;
+PENDING_ACTIVE_BASE = 3000;
+PENDING_COUNTDOWN_BASE = 3200;
+PENDING_NOTE_BASE = 3400;
+PENDING_VELOCITY_BASE = 3600;
+PENDING_CHANNEL_BASE = 3800;
+PENDING_LENGTH_BASE = 4000;
+PENDING_TRACK_BASE = 4200;
+PENDING_STEP_BASE = 4400;
+PENDING_PITCH_BASE = 4800;
+PENDING_MOD_BASE = 5000;
+
+// V0.28 held live-pad state.
+// Store the translated MIDI note/channel at Note On so Note Off is
+// correct even if the user changes track or pad bank while holding it.
+LIVE_PAD_NOTE_BASE    = 2300;
+LIVE_PAD_CHANNEL_BASE = 2320;
+LIVE_PAD_ACTIVE_BASE  = 2340;
+
+init_live = 0;
+while(init_live < 16)
+(
+  LIVE_PAD_NOTE_BASE[init_live] = -1;
+  LIVE_PAD_CHANNEL_BASE[init_live] = 0;
+  LIVE_PAD_ACTIVE_BASE[init_live] = 0;
+  init_live += 1;
+);
+
+
+init_t = 0;
+while(init_t < NUM_TRACKS)
+(
+  ROLL_ACTIVE_BASE[init_t] = 0;
+  ROLL_REMAIN_BASE[init_t] = 0;
+  ROLL_OCTAVE_COUNT_BASE[init_t] = 0;
+  ROLL_INDEX_BASE[init_t] = 0;
+  gmem[TRACK_PLAYSTEP_BASE + init_t] = 0;
+  gmem[TRACK_ACTIVE_PATTERN_BASE + init_t] = 1;
+  gmem[TRACK_ACTIVE_REST_BASE + init_t] = 0;
+  gmem[TRACK_PENDING_PATTERN_BASE + init_t] = 0;
+  gmem[ARRANGER_PLAY_POS_BASE + init_t] = 0;
+  TRACK_TICK_REMAIN_BASE[init_t] = 1;
+  init_t += 1;
+);
+
+pending_i = 0;
+while(pending_i < PENDING_MAX)
+(
+  PENDING_ACTIVE_BASE[pending_i] = 0;
+  pending_i += 1;
+);
+
+init_v = 0;
+while(init_v < MAX_VOICES)
+(
+  gmem[VOICE_ACTIVE_BASE + init_v] = 0;
+  gmem[VOICE_REMAIN_BASE + init_v] = 0;
+  init_v += 1;
+);
+
+init_i = 0;
+while(init_i < NUM_TRACKS * MAX_STEPS)
+(
+  gmem[ACTIVE_DISPLAY_BASE + init_i] = 0;
+  init_i += 1;
+);
+
+function clamp_value(v, lo, hi)
+(
+  v < lo ? v = lo;
+  v > hi ? v = hi;
+  v;
+);
+
+function get_active_pattern(track)
+local(slot)
+(
+  slot = floor(gmem[TRACK_ACTIVE_PATTERN_BASE + track]);
+  slot < 1 ? slot = 1;
+  slot > NUM_PATTERNS ? slot = NUM_PATTERNS;
+  slot;
+);
+
+function pattern_cell_addr(track, pattern_slot, step)
+local(index)
+(
+  pattern_slot = clamp_value(floor(pattern_slot), 1, NUM_PATTERNS);
+  pattern_slot == 1 ?
+  (
+    CELL_BASE + (track * MAX_STEPS + step) * CELL_SIZE;
+  )
+  :
+  (
+    index = (track * (NUM_PATTERNS - 1) + (pattern_slot - 2)) * MAX_STEPS + step;
+    MULTI_PATTERN_CELL_BASE + index * CELL_SIZE;
+  );
+);
+
+function cell_addr(track, step)
+(
+  pattern_cell_addr(track, get_active_pattern(track), step);
+);
+
+function push_hw_event(type, a, b, c)
+local(w, r, next, addr)
+(
+  w = floor(gmem[HW_WRITE]);
+  r = floor(gmem[HW_READ]);
+
+  next = w + 1;
+  next >= HW_SLOTS ? next = 0;
+
+  next != r ?
+  (
+    addr = HW_BASE + w * HW_STRIDE;
+
+    gmem[addr + 0] = type;
+    gmem[addr + 1] = a;
+    gmem[addr + 2] = b;
+    gmem[addr + 3] = c;
+
+    gmem[HW_WRITE] = next;
+  );
+);
+
+function find_free_voice()
+local(v, found)
+(
+  v = 0;
+  found = -1;
+
+  while(v < MAX_VOICES && found < 0)
+  (
+    gmem[VOICE_ACTIVE_BASE + v] <= 0 ?
+    (
+      found = v;
+    );
+
+    v += 1;
+  );
+
+  found;
+);
+
+function active_addr(track, step)
+(
+  ACTIVE_DISPLAY_BASE + track * MAX_STEPS + step;
+);
+
+function change_active_count(track, step, delta)
+local(addr, value)
+(
+  track >= 0 &&
+  track < NUM_TRACKS &&
+  step >= 0 &&
+  step < MAX_STEPS ?
+  (
+    addr = active_addr(track, step);
+    value = gmem[addr] + delta;
+    value < 0 ? value = 0;
+    gmem[addr] = value;
+  );
+);
+
+function stop_voice(v, offset)
+local(note, channel)
+(
+  gmem[VOICE_ACTIVE_BASE + v] > 0 ?
+  (
+    note = floor(gmem[VOICE_NOTE_BASE + v]);
+    channel = floor(gmem[VOICE_CHANNEL_BASE + v]);
+
+    midisend(
+      floor(offset),
+      0x80 | channel,
+      note,
+      0
+    );
+
+    change_active_count(
+      floor(gmem[VOICE_TRACK_BASE + v]),
+      floor(gmem[VOICE_STEP_BASE + v]),
+      -1
+    );
+
+    gmem[VOICE_ACTIVE_BASE + v] = 0;
+    gmem[VOICE_REMAIN_BASE + v] = 0;
+  );
+);
+
+function stop_all_voices()
+local(v, channel)
+(
+  v = 0;
+
+  while(v < MAX_VOICES)
+  (
+    stop_voice(v, 0);
+    v += 1;
+  );
+
+  channel = 0;
+
+  while(channel < 16)
+  (
+    midisend(0, 0xB0 | channel, 123, 0);
+    midisend(0, 0xB0 | channel, 120, 0);
+    channel += 1;
+  );
+);
+
+function stop_audition_voices()
+local(v)
+(
+  v = 0;
+
+  while(v < MAX_VOICES)
+  (
+    gmem[VOICE_ACTIVE_BASE + v] > 0
+    &&
+    gmem[VOICE_TRACK_BASE + v] < 0 ?
+    (
+      stop_voice(
+        v,
+        0
+      );
+    );
+
+    v += 1;
+  );
+);
+
+
+function clear_active_display()
+local(i)
+(
+  i = 0;
+
+  while(i < NUM_TRACKS * MAX_STEPS)
+  (
+    gmem[ACTIVE_DISPLAY_BASE + i] = 0;
+    i += 1;
+  );
+);
+
+function update_active_display()
+(
+  // Active counts are maintained incrementally by start/stop_voice.
+  // Keep a real expression here: EEL2 rejects an otherwise empty body.
+  0;
+);
+
+
+function start_note(note, velocity, channel, length_units, start_offset, track, step)
+local(v, length_samples, available, remaining)
+(
+  note = clamp_value(floor(note), 0, 127);
+  velocity = clamp_value(floor(velocity), 1, 127);
+  channel = clamp_value(floor(channel), 0, 15);
+
+  length_units < 1 ? length_units = 1;
+
+  // LEN is absolute musical time in 1/16-note units, independent of
+  // the current track's pattern step resolution.
+  length_samples = sixteenth_samples * length_units;
+
+  midisend(
+    floor(start_offset),
+    0x90 | channel,
+    note,
+    velocity
+  );
+
+  available = samplesblock - start_offset;
+
+  length_samples < available ?
+  (
+    midisend(
+      floor(start_offset + length_samples),
+      0x80 | channel,
+      note,
+      0
+    );
+  )
+  :
+  (
+    v = find_free_voice();
+
+    v >= 0 ?
+    (
+      remaining = length_samples - available;
+
+      gmem[VOICE_NOTE_BASE + v] = note;
+      gmem[VOICE_CHANNEL_BASE + v] = channel;
+      gmem[VOICE_REMAIN_BASE + v] = remaining;
+      gmem[VOICE_ACTIVE_BASE + v] = 1;
+      gmem[VOICE_TRACK_BASE + v] = track;
+      gmem[VOICE_STEP_BASE + v] = step;
+
+      change_active_count(track, step, 1);
+    );
+  );
+);
+
+
+function start_note_samples(
+  note,
+  velocity,
+  channel,
+  length_samples,
+  start_offset,
+  track,
+  step
+)
+local(v, available, remaining)
+(
+  note = clamp_value(floor(note), 0, 127);
+  velocity = clamp_value(floor(velocity), 1, 127);
+  channel = clamp_value(floor(channel), 0, 15);
+
+  length_samples < 16 ?
+  (
+    length_samples = 16;
+  );
+
+  midisend(
+    floor(start_offset),
+    0x90 | channel,
+    note,
+    velocity
+  );
+
+  available =
+    samplesblock
+    -
+    start_offset;
+
+  length_samples < available ?
+  (
+    midisend(
+      floor(
+        start_offset
+        +
+        length_samples
+      ),
+      0x80 | channel,
+      note,
+      0
+    );
+  )
+  :
+  (
+    v = find_free_voice();
+
+    v >= 0 ?
+    (
+      remaining =
+        length_samples
+        -
+        available;
+
+      gmem[VOICE_NOTE_BASE + v] = note;
+      gmem[VOICE_CHANNEL_BASE + v] = channel;
+      gmem[VOICE_REMAIN_BASE + v] = remaining;
+      gmem[VOICE_ACTIVE_BASE + v] = 1;
+      gmem[VOICE_TRACK_BASE + v] = track;
+      gmem[VOICE_STEP_BASE + v] = step;
+
+      change_active_count(track, step, 1);
+    );
+  );
+);
+
+
+function send_step_controllers(channel, pitch_value, mod_value, offset)
+local(bend, lsb, msb)
+(
+  channel = clamp_value(floor(channel), 0, 15);
+  pitch_value = clamp_value(floor(pitch_value), 0, 127);
+  mod_value = clamp_value(floor(mod_value), 0, 127);
+  offset = max(0, floor(offset));
+
+  midisend(offset, 0xB0 | channel, 1, mod_value);
+
+  pitch_value < 64 ?
+  (
+    bend = floor((pitch_value / 64) * 8192 + 0.5);
+  )
+  :
+  pitch_value > 64 ?
+  (
+    bend = 8192 + floor(((pitch_value - 64) / 63) * 8191 + 0.5);
+  )
+  :
+  (
+    bend = 8192;
+  );
+  bend = clamp_value(bend, 0, 16383);
+  lsb = bend & 127;
+  msb = floor(bend / 128);
+  midisend(offset, 0xE0 | channel, lsb, msb);
+);
+
+function clear_pending_notes()
+local(i)
+(
+  i = 0;
+  while(i < PENDING_MAX)
+  (
+    PENDING_ACTIVE_BASE[i] = 0;
+    i += 1;
+  );
+);
+
+function schedule_pending_note(countdown, note, velocity, channel, length_units, track, step, pitch_value, mod_value)
+local(i, found)
+(
+  countdown = max(0, countdown);
+  i = 0;
+  found = -1;
+  while(i < PENDING_MAX && found < 0)
+  (
+    PENDING_ACTIVE_BASE[i] <= 0 ? found = i;
+    i += 1;
+  );
+
+  found >= 0 ?
+  (
+    PENDING_ACTIVE_BASE[found] = 1;
+    PENDING_COUNTDOWN_BASE[found] = countdown;
+    PENDING_NOTE_BASE[found] = note;
+    PENDING_VELOCITY_BASE[found] = velocity;
+    PENDING_CHANNEL_BASE[found] = channel;
+    PENDING_LENGTH_BASE[found] = length_units;
+    PENDING_TRACK_BASE[found] = track;
+    PENDING_STEP_BASE[found] = step;
+    PENDING_PITCH_BASE[found] = pitch_value;
+    PENDING_MOD_BASE[found] = mod_value;
+  );
+);
+
+function process_pending_notes()
+local(i, countdown, track, offset)
+(
+  i = 0;
+  while(i < PENDING_MAX)
+  (
+    PENDING_ACTIVE_BASE[i] > 0 ?
+    (
+      countdown = PENDING_COUNTDOWN_BASE[i];
+      track = floor(PENDING_TRACK_BASE[i]);
+
+      (
+        track >= 0 && track < NUM_TRACKS &&
+        (gmem[TRACK_MUTE_BASE + track] > 0 || (gmem[ANY_SOLO_GMEM] > 0 && gmem[TRACK_SOLO_BASE + track] <= 0))
+      ) ?
+      (
+        PENDING_ACTIVE_BASE[i] = 0;
+      )
+      :
+      countdown < samplesblock ?
+      (
+        offset = max(0, countdown);
+        send_step_controllers(
+          PENDING_CHANNEL_BASE[i],
+          PENDING_PITCH_BASE[i], PENDING_MOD_BASE[i], offset
+        );
+        start_note(
+          PENDING_NOTE_BASE[i], PENDING_VELOCITY_BASE[i], PENDING_CHANNEL_BASE[i],
+          PENDING_LENGTH_BASE[i], offset, PENDING_TRACK_BASE[i], PENDING_STEP_BASE[i]
+        );
+        PENDING_ACTIVE_BASE[i] = 0;
+      )
+      :
+      (
+        PENDING_COUNTDOWN_BASE[i] = countdown - samplesblock;
+      );
+    );
+    i += 1;
+  );
+);
+
+function clear_rolls()
+local(track)
+(
+  track = 0;
+
+  while(track < NUM_TRACKS)
+  (
+    ROLL_ACTIVE_BASE[track] = 0;
+    ROLL_REMAIN_BASE[track] = 0;
+    ROLL_COUNTDOWN_BASE[track] = 0;
+    track += 1;
+  );
+);
+
+
+function schedule_roll(
+  track,
+  step,
+  note,
+  velocity,
+  channel,
+  retriggers,
+  offset,
+  step_duration_samples
+)
+local(
+  interval_samples,
+  gate_samples,
+  i,
+  trigger_offset,
+  pending_started
+)
+(
+  retriggers =
+    clamp_value(
+      floor(retriggers),
+      1,
+      16
+    );
+
+  interval_samples =
+    step_duration_samples
+    /
+    retriggers;
+
+  // Short gate ensures each repeated Note On is preceded by a Note Off,
+  // so synths actually retrigger their envelopes.
+  gate_samples =
+    max(
+      24,
+      interval_samples * 0.68
+    );
+
+  ROLL_ACTIVE_BASE[track] = 0;
+  ROLL_REMAIN_BASE[track] = 0;
+  ROLL_OCTAVE_COUNT_BASE[track] = 0;
+  ROLL_INDEX_BASE[track] = 0;
+
+  i = 0;
+  pending_started = 0;
+
+  while(i < retriggers)
+  (
+    trigger_offset =
+      offset
+      +
+      interval_samples * i;
+
+    pending_started <= 0
+    &&
+    trigger_offset < samplesblock ?
+    (
+      start_note_samples(
+        note,
+        velocity,
+        channel,
+        gate_samples,
+        trigger_offset,
+        track,
+        step
+      );
+    )
+    :
+    pending_started <= 0 ?
+    (
+      // The remaining hits fall in future audio blocks.
+      // Store them and process them sample-accurately later.
+      ROLL_ACTIVE_BASE[track] = 1;
+      ROLL_NOTE_BASE[track] = note;
+      ROLL_VELOCITY_BASE[track] = velocity;
+      ROLL_CHANNEL_BASE[track] = channel;
+      ROLL_TRACKSTEP_BASE[track] = step;
+      ROLL_REMAIN_BASE[track] = retriggers - i;
+      ROLL_COUNTDOWN_BASE[track] =
+        trigger_offset
+        -
+        samplesblock;
+      ROLL_INTERVAL_BASE[track] = interval_samples;
+      ROLL_GATE_BASE[track] = gate_samples;
+      ROLL_OCTAVE_COUNT_BASE[track] = 0;
+      ROLL_INDEX_BASE[track] = i;
+
+      pending_started = 1;
+    );
+
+    i += 1;
+  );
+);
+
+
+function schedule_octave_burst(
+  track,
+  step,
+  note,
+  velocity,
+  channel,
+  octave_count,
+  divisions,
+  offset,
+  step_duration_samples
+)
+local(
+  interval_samples,
+  gate_samples,
+  i,
+  burst_note,
+  trigger_offset,
+  pending_started
+)
+(
+  octave_count = clamp_value(floor(octave_count), 2, 4);
+  divisions = clamp_value(floor(divisions), octave_count, 16);
+
+  interval_samples = step_duration_samples / divisions;
+  gate_samples = max(24, interval_samples * 0.68);
+
+  ROLL_ACTIVE_BASE[track] = 0;
+  ROLL_REMAIN_BASE[track] = 0;
+  ROLL_OCTAVE_COUNT_BASE[track] = octave_count;
+  ROLL_INDEX_BASE[track] = 0;
+
+  i = 0;
+  pending_started = 0;
+
+  while(i < octave_count)
+  (
+    burst_note = note + i * 12;
+    trigger_offset = offset + interval_samples * i;
+
+    pending_started <= 0 && trigger_offset < samplesblock ?
+    (
+      burst_note <= 127 ?
+      (
+        start_note_samples(
+          burst_note,
+          velocity,
+          channel,
+          gate_samples,
+          trigger_offset,
+          track,
+          step
+        );
+      );
+    )
+    :
+    pending_started <= 0 ?
+    (
+      ROLL_ACTIVE_BASE[track] = 1;
+      ROLL_NOTE_BASE[track] = note;
+      ROLL_VELOCITY_BASE[track] = velocity;
+      ROLL_CHANNEL_BASE[track] = channel;
+      ROLL_TRACKSTEP_BASE[track] = step;
+      ROLL_REMAIN_BASE[track] = octave_count - i;
+      ROLL_COUNTDOWN_BASE[track] = trigger_offset - samplesblock;
+      ROLL_INTERVAL_BASE[track] = interval_samples;
+      ROLL_GATE_BASE[track] = gate_samples;
+      ROLL_OCTAVE_COUNT_BASE[track] = octave_count;
+      ROLL_INDEX_BASE[track] = i;
+      pending_started = 1;
+    );
+
+    i += 1;
+  );
+);
+
+
+function process_rolls()
+local(
+  track,
+  remaining,
+  countdown,
+  interval_samples,
+  gate_samples,
+  octave_count,
+  hit_index,
+  trigger_note
+)
+(
+  track = 0;
+
+  while(track < NUM_TRACKS)
+  (
+    ROLL_ACTIVE_BASE[track] > 0 ?
+    (
+      (
+        gmem[TRACK_MUTE_BASE + track] > 0
+        ||
+        (
+          gmem[ANY_SOLO_GMEM] > 0
+          &&
+          gmem[TRACK_SOLO_BASE + track] <= 0
+        )
+      ) ?
+      (
+        ROLL_ACTIVE_BASE[track] = 0;
+        ROLL_REMAIN_BASE[track] = 0;
+      )
+      :
+      (
+        remaining =
+          floor(
+            ROLL_REMAIN_BASE[track]
+          );
+        countdown =
+          ROLL_COUNTDOWN_BASE[track];
+
+        interval_samples =
+          ROLL_INTERVAL_BASE[track];
+
+        gate_samples =
+          ROLL_GATE_BASE[track];
+
+        octave_count = floor(ROLL_OCTAVE_COUNT_BASE[track]);
+        hit_index = floor(ROLL_INDEX_BASE[track]);
+
+        while(
+          remaining > 0
+          &&
+          countdown < samplesblock
+        )
+        (
+          trigger_note = ROLL_NOTE_BASE[track];
+          octave_count > 0 ? trigger_note += hit_index * 12;
+
+          trigger_note <= 127 ?
+          (
+            start_note_samples(
+              trigger_note,
+              ROLL_VELOCITY_BASE[track],
+              ROLL_CHANNEL_BASE[track],
+              gate_samples,
+              max(0, countdown),
+              track,
+              ROLL_TRACKSTEP_BASE[track]
+            );
+          );
+
+          hit_index += 1;
+          remaining -= 1;
+          countdown += interval_samples;
+        );
+
+        ROLL_INDEX_BASE[track] = hit_index;
+
+        remaining <= 0 ?
+        (
+          ROLL_ACTIVE_BASE[track] = 0;
+          ROLL_REMAIN_BASE[track] = 0;
+        )
+        :
+        (
+          ROLL_REMAIN_BASE[track] = remaining;
+
+          ROLL_COUNTDOWN_BASE[track] =
+            countdown
+            -
+            samplesblock;
+        );
+      );
+    );
+
+    track += 1;
+  );
+);
+
+
+function arranger_rest_length_at(track, position)
+local(length)
+(
+  position = clamp_value(floor(position), 0, MAX_ARRANGER_STEPS - 1);
+  length = floor(gmem[ARRANGER_REST_LENGTH_BASE + track * MAX_ARRANGER_STEPS + position]);
+  length < 1 ? length = 16;
+  length > MAX_STEPS ? length = MAX_STEPS;
+  length;
+);
+
+function arranger_rest_division_at(track, position)
+local(division)
+(
+  position = clamp_value(floor(position), 0, MAX_ARRANGER_STEPS - 1);
+  division = floor(gmem[ARRANGER_REST_DIV_BASE + track * MAX_ARRANGER_STEPS + position]);
+  division == 1 || division == 2 || division == 4 || division == 8 ||
+  division == 16 || division == 32 || division == 64 || division == 128 ?
+  (
+    division;
+  )
+  :
+  (
+    16;
+  );
+);
+
+function get_track_length(track)
+local(length, slot, addr, position)
+(
+  gmem[TRACK_ACTIVE_REST_BASE + track] > 0 ?
+  (
+    position = floor(gmem[ARRANGER_PLAY_POS_BASE + track]);
+    length = arranger_rest_length_at(track, position);
+  )
+  :
+  (
+    slot = get_active_pattern(track);
+    addr = PATTERN_LENGTH_MATRIX_BASE + track * NUM_PATTERNS + slot - 1;
+    length = floor(gmem[addr]);
+    length < 1 ? length = 16;
+    length > MAX_STEPS ? length = MAX_STEPS;
+  );
+  length;
+);
+
+function get_track_division(track)
+local(division, slot, addr, position)
+(
+  gmem[TRACK_ACTIVE_REST_BASE + track] > 0 ?
+  (
+    position = floor(gmem[ARRANGER_PLAY_POS_BASE + track]);
+    division = arranger_rest_division_at(track, position);
+  )
+  :
+  (
+    slot = get_active_pattern(track);
+    addr = PATTERN_DIV_MATRIX_BASE + track * NUM_PATTERNS + slot - 1;
+    division = floor(gmem[addr]);
+
+    division == 1 || division == 2 || division == 4 || division == 8 ||
+    division == 16 || division == 32 || division == 64 || division == 128 ?
+    (
+      division;
+    )
+    :
+    (
+      division = 16;
+    );
+  );
+  division;
+);
+
+function get_track_ticks(track)
+local(division, ticks)
+(
+  division = get_track_division(track);
+  ticks = floor(128 / division);
+  ticks < 1 ? ticks = 1;
+  ticks;
+);
+
+function get_track_step_samples(track)
+(
+  base_tick_samples * get_track_ticks(track);
+);
+
+function track_arranger_length(track)
+local(length)
+(
+  length = floor(gmem[ARRANGER_LENGTH_BASE + track]);
+  length < 0 ? length = 0;
+  length > MAX_ARRANGER_STEPS ? length = MAX_ARRANGER_STEPS;
+  length;
+);
+
+function arranger_pattern_at(track, position)
+local(slot)
+(
+  position < 0 || position >= MAX_ARRANGER_STEPS ?
+  (
+    ARRANGER_EMPTY;
+  )
+  :
+  (
+    slot = floor(gmem[ARRANGER_SEQUENCE_BASE + track * MAX_ARRANGER_STEPS + position]);
+    slot < ARRANGER_EMPTY ? slot = ARRANGER_EMPTY;
+    slot > NUM_PATTERNS ? slot = NUM_PATTERNS;
+    slot;
+  );
+);
+
+function activate_arranger_entry(track, position)
+local(slot)
+(
+  slot = arranger_pattern_at(track, position);
+  slot <= 0 ?
+  (
+    // REST: keep the previous real pattern latched so leaving ARRANGER can
+    // return to the last pattern that was actually heard.
+    gmem[TRACK_ACTIVE_REST_BASE + track] = 1;
+  )
+  :
+  (
+    gmem[TRACK_ACTIVE_REST_BASE + track] = 0;
+    gmem[TRACK_ACTIVE_PATTERN_BASE + track] = slot;
+  );
+  slot;
+);
+
+function select_start_pattern(track)
+local(sequence_length, slot, arranger_on, true_song)
+(
+  sequence_length = track_arranger_length(track);
+  arranger_on = gmem[ARRANGER_MODE_GMEM] > 0;
+  true_song = gmem[SONG_MODE_GMEM] > 0;
+
+  arranger_on ?
+  (
+    sequence_length > 0 ?
+    (
+      gmem[ARRANGER_PLAY_POS_BASE + track] = 0;
+      slot = activate_arranger_entry(track, 0);
+    )
+    :
+    (
+      // No explicit arrangement = silence. TRUE SONG still advances through
+      // silent timeline cells, LOOP SONG simply remains unassigned/silent.
+      gmem[ARRANGER_PLAY_POS_BASE + track] = true_song ? 0 : -1;
+      gmem[TRACK_ACTIVE_REST_BASE + track] = 1;
+      slot = ARRANGER_EMPTY;
+    );
+  )
+  :
+  (
+    gmem[TRACK_ACTIVE_REST_BASE + track] = 0;
+    slot = floor(gmem[TRACK_ACTIVE_PATTERN_BASE + track]);
+    (slot < 1 || slot > NUM_PATTERNS) ?
+    (
+      slot = floor(gmem[TRACK_SELECTED_PATTERN_BASE + track]);
+      slot = clamp_value(slot, 1, NUM_PATTERNS);
+    );
+    gmem[TRACK_ACTIVE_PATTERN_BASE + track] = slot;
+  );
+
+  gmem[TRACK_PENDING_PATTERN_BASE + track] = 0;
+  slot;
+);
+
+function advance_pattern_at_boundary(track)
+local(sequence_length, position, slot, arranger_on, true_song, pending)
+(
+  sequence_length = track_arranger_length(track);
+  arranger_on = gmem[ARRANGER_MODE_GMEM] > 0;
+  true_song = gmem[SONG_MODE_GMEM] > 0;
+
+  arranger_on ?
+  (
+    sequence_length > 0 ?
+    (
+      position = floor(gmem[ARRANGER_PLAY_POS_BASE + track]) + 1;
+      position < 0 ? position = 0;
+      true_song > 0 ?
+      (
+        // Linear DAW-style song: never wrap. Beyond explicit material,
+        // continue forward as timed silence.
+        gmem[ARRANGER_PLAY_POS_BASE + track] = position;
+        position < sequence_length ?
+        (
+          slot = activate_arranger_entry(track, position);
+        )
+        :
+        (
+          gmem[TRACK_ACTIVE_REST_BASE + track] = 1;
+          slot = ARRANGER_EMPTY;
+        );
+      )
+      :
+      (
+        position >= sequence_length ? position = 0;
+        gmem[ARRANGER_PLAY_POS_BASE + track] = position;
+        slot = activate_arranger_entry(track, position);
+      );
+    )
+    :
+    (
+      true_song > 0 ?
+      (
+        position = floor(gmem[ARRANGER_PLAY_POS_BASE + track]) + 1;
+        position < 0 ? position = 0;
+        gmem[ARRANGER_PLAY_POS_BASE + track] = position;
+      )
+      :
+      (
+        gmem[ARRANGER_PLAY_POS_BASE + track] = -1;
+      );
+      gmem[TRACK_ACTIVE_REST_BASE + track] = 1;
+      slot = ARRANGER_EMPTY;
+    );
+  )
+  :
+  (
+    gmem[TRACK_ACTIVE_REST_BASE + track] = 0;
+    pending = floor(gmem[TRACK_PENDING_PATTERN_BASE + track]);
+    pending >= 1 && pending <= NUM_PATTERNS ?
+    (
+      gmem[TRACK_ACTIVE_PATTERN_BASE + track] = pending;
+      gmem[TRACK_PENDING_PATTERN_BASE + track] = 0;
+    );
+    slot = floor(gmem[TRACK_ACTIVE_PATTERN_BASE + track]);
+    slot = clamp_value(slot, 1, NUM_PATTERNS);
+    gmem[TRACK_ACTIVE_PATTERN_BASE + track] = slot;
+  );
+);
+
+function initialise_track_steps(start_step, selected_track)
+local(track, length, step, arranger_on)
+(
+  selected_track = clamp_value(floor(selected_track), 0, NUM_TRACKS - 1);
+  arranger_on = gmem[ARRANGER_MODE_GMEM] > 0;
+  track = 0;
+  while(track < NUM_TRACKS)
+  (
+    select_start_pattern(track);
+    length = get_track_length(track);
+    step = arranger_on ? 0 : clamp_value(floor(start_step), 0, length - 1);
+    gmem[TRACK_PLAYSTEP_BASE + track] = step;
+    TRACK_TICK_REMAIN_BASE[track] = get_track_ticks(track);
+    track += 1;
+  );
+  master_tick_position = 0;
+  gmem[ARRANGER_SONG_TICK_GMEM] = 0;
+);
+
+function schedule_early_shift_for_next(track, step, offset, step_duration_samples)
+local(next_step, addr, note, velocity, command, parameter, length_units, probability, trigger, channel, delay_samples)
+(
+  next_step = (step + 1) % get_track_length(track);
+  // Do not pre-schedule a negative SHIFT across a pattern boundary.
+  (step + 1) >= get_track_length(track) ? next_step = -1;
+  next_step >= 0 ? addr = cell_addr(track, next_step) : addr = -1;
+  note = addr >= 0 ? floor(gmem[addr + 0]) : -1;
+  velocity = addr >= 0 ? floor(gmem[addr + 1]) : 0;
+  command = addr >= 0 ? floor(gmem[addr + 3]) : 0;
+  parameter = addr >= 0 ? floor(gmem[addr + 4]) : 0;
+  length_units = addr >= 0 ? floor(gmem[addr + 5]) : 1;
+  probability = addr >= 0 ? clamp_value(floor(gmem[addr + 6]), 0, 100) : 0;
+
+  note >= 0 && velocity > 0 && command == 5 && parameter < 50 &&
+  gmem[TRACK_MUTE_BASE + track] <= 0 &&
+  (gmem[ANY_SOLO_GMEM] <= 0 || gmem[TRACK_SOLO_BASE + track] > 0) ?
+  (
+    trigger = probability >= 100 || rand(100) < probability;
+    trigger ?
+    (
+      channel = track;
+      delay_samples = offset + step_duration_samples * (0.5 + clamp_value(parameter, 0, 49) / 100);
+      delay_samples < samplesblock ?
+      (
+        send_step_controllers(channel, 64, 0, delay_samples);
+        start_note(note, velocity, channel, length_units, delay_samples, track, next_step);
+      )
+      :
+      schedule_pending_note(delay_samples - samplesblock, note, velocity, channel, length_units, track, next_step, 64, 0);
+    );
+  );
+);
+
+function play_cell(track, step, offset, step_duration_samples)
+local(
+  addr, note, velocity, command, parameter, length_units, probability,
+  channel, trigger, delayed_samples, pitch_value, mod_value, flam_delay
+)
+(
+  gmem[TRACK_ACTIVE_REST_BASE + track] <= 0 ?
+  (
+    addr = cell_addr(track, step);
+    note = floor(gmem[addr + 0]);
+    velocity = floor(gmem[addr + 1]);
+    command = floor(gmem[addr + 3]);
+    parameter = floor(gmem[addr + 4]);
+    length_units = floor(gmem[addr + 5]);
+    probability = clamp_value(floor(gmem[addr + 6]), 0, 100);
+  
+    // Track number is now the permanent destination channel. No per-step INST.
+    channel = track;
+  
+    note >= 0 && velocity > 0 &&
+    gmem[TRACK_MUTE_BASE + track] <= 0 &&
+    (gmem[ANY_SOLO_GMEM] <= 0 || gmem[TRACK_SOLO_BASE + track] > 0) ?
+    (
+      // Negative SHIFT is pre-scheduled by the preceding step.
+      !(command == 5 && parameter < 50) ?
+      (
+        trigger = probability >= 100 || rand(100) < probability;
+        trigger ?
+        (
+          pitch_value = command == 3 ? clamp_value(parameter, 0, 127) : 64;
+          mod_value = command == 4 ? clamp_value(parameter, 0, 127) : 0;
+  
+          command == 1 ?
+          (
+            send_step_controllers(channel, pitch_value, mod_value, offset);
+            schedule_roll(track, step, note, velocity, channel, parameter, offset, step_duration_samples);
+          )
+          :
+          (command >= 7 && command <= 9) ?
+          (
+            send_step_controllers(channel, 64, 0, offset);
+            schedule_octave_burst(
+              track,
+              step,
+              note,
+              velocity,
+              channel,
+              command - 5,
+              parameter,
+              offset,
+              step_duration_samples
+            );
+          )
+          :
+          command == 2 ?
+          (
+            delayed_samples = offset + step_duration_samples * (clamp_value(parameter, 0, 99) / 100);
+            delayed_samples < samplesblock ?
+            (
+              send_step_controllers(channel, pitch_value, mod_value, delayed_samples);
+              start_note(note, velocity, channel, length_units, delayed_samples, track, step);
+            )
+            :
+            schedule_pending_note(delayed_samples - samplesblock, note, velocity, channel, length_units, track, step, pitch_value, mod_value);
+          )
+          :
+          command == 5 ?
+          (
+            delayed_samples = offset + step_duration_samples * ((clamp_value(parameter, 50, 100) - 50) / 100);
+            delayed_samples < samplesblock ?
+            (
+              send_step_controllers(channel, 64, 0, delayed_samples);
+              start_note(note, velocity, channel, length_units, delayed_samples, track, step);
+            )
+            :
+            schedule_pending_note(delayed_samples - samplesblock, note, velocity, channel, length_units, track, step, 64, 0);
+          )
+          :
+          command == 6 ?
+          (
+            send_step_controllers(channel, 64, 0, offset);
+            start_note(note, velocity, channel, length_units, offset, track, step);
+            flam_delay = offset + step_duration_samples * (clamp_value(parameter, 1, 99) / 100);
+            flam_delay < samplesblock ?
+            (
+              send_step_controllers(channel, 64, 0, flam_delay);
+              start_note(note, velocity, channel, length_units, flam_delay, track, step);
+            )
+            :
+            schedule_pending_note(flam_delay - samplesblock, note, velocity, channel, length_units, track, step, 64, 0);
+          )
+          :
+          (
+            send_step_controllers(channel, pitch_value, mod_value, offset);
+            start_note(note, velocity, channel, length_units, offset, track, step);
+          );
+        );
+      );
+    );
+  
+    // Schedule an early SHIFT on the following cell while we still have time.
+    schedule_early_shift_for_next(track, step, offset, step_duration_samples);
+  );
+);
+function play_current_track_steps(offset)
+local(track, step)
+(
+  track = 0;
+
+  while(track < NUM_TRACKS)
+  (
+    step = floor(gmem[TRACK_PLAYSTEP_BASE + track]);
+
+    play_cell(
+      track,
+      step,
+      offset,
+      get_track_step_samples(track)
+    );
+
+    track += 1;
+  );
+);
+
+function advance_master_tick_and_play(offset)
+local(track, remaining, length, step)
+(
+  master_tick_position += 1;
+  gmem[ARRANGER_SONG_TICK_GMEM] = master_tick_position;
+  track = 0;
+
+  while(track < NUM_TRACKS)
+  (
+    remaining = TRACK_TICK_REMAIN_BASE[track] - 1;
+    remaining <= 0 ?
+    (
+      length = get_track_length(track);
+      step = floor(gmem[TRACK_PLAYSTEP_BASE + track]) + 1;
+      step >= length ?
+      (
+        advance_pattern_at_boundary(track);
+        step = 0;
+      );
+      gmem[TRACK_PLAYSTEP_BASE + track] = step;
+      play_cell(track, step, offset, base_tick_samples * get_track_ticks(track));
+      TRACK_TICK_REMAIN_BASE[track] = get_track_ticks(track);
+    )
+    :
+    (
+      TRACK_TICK_REMAIN_BASE[track] = remaining;
+    );
+    track += 1;
+  );
+);
+
+function play_step(step, offset)
+(
+  play_current_track_steps(offset);
+);
+
+
+function live_pad_note_on(pad_index, velocity, offset)
+local(selected_track, channel, note)
+(
+  pad_index =
+    clamp_value(
+      floor(pad_index),
+      0,
+      15
+    );
+
+  selected_track =
+    floor(
+      gmem[
+        CURRENT_TRACK_GMEM
+      ]
+    );
+
+  selected_track =
+    clamp_value(
+      selected_track,
+      1,
+      16
+    );
+
+  channel =
+    selected_track
+    -
+    1;
+
+  // V0.45.5 Lua publishes the exact pad map. This lets Scale Lock and
+  // the shared octave bank affect low-latency Pad Mode too.
+  note = floor(gmem[MK3_PAD_NOTE_MAP_BASE + pad_index]);
+
+  (note < 0 || note > 127) ?
+  (
+    note = mk3_page * 12 + pad_index;
+  );
+
+  note = clamp_value(note, 0, 127);
+
+  // Defensive re-trigger: release an older held note on this same
+  // physical pad before replacing it.
+  LIVE_PAD_ACTIVE_BASE[pad_index] > 0 ?
+  (
+    midisend(
+      floor(offset),
+      0x80
+      |
+      floor(
+        LIVE_PAD_CHANNEL_BASE[
+          pad_index
+        ]
+      ),
+      floor(
+        LIVE_PAD_NOTE_BASE[
+          pad_index
+        ]
+      ),
+      0
+    );
+  );
+
+  midisend(
+    floor(offset),
+    0x90 | channel,
+    note,
+    clamp_value(
+      floor(velocity),
+      1,
+      127
+    )
+  );
+
+  LIVE_PAD_NOTE_BASE[pad_index] = note;
+  LIVE_PAD_CHANNEL_BASE[pad_index] = channel;
+  LIVE_PAD_ACTIVE_BASE[pad_index] = 1;
+);
+
+
+function live_pad_note_off(pad_index, offset)
+local(channel, note)
+(
+  pad_index =
+    clamp_value(
+      floor(pad_index),
+      0,
+      15
+    );
+
+  LIVE_PAD_ACTIVE_BASE[pad_index] > 0 ?
+  (
+    channel =
+      floor(
+        LIVE_PAD_CHANNEL_BASE[
+          pad_index
+        ]
+      );
+
+    note =
+      floor(
+        LIVE_PAD_NOTE_BASE[
+          pad_index
+        ]
+      );
+
+    midisend(
+      floor(offset),
+      0x80 | channel,
+      note,
+      0
+    );
+
+    LIVE_PAD_ACTIVE_BASE[pad_index] = 0;
+    LIVE_PAD_NOTE_BASE[pad_index] = -1;
+  );
+);
+
+
+function stop_all_live_pads()
+local(pad_index)
+(
+  pad_index = 0;
+
+  while(pad_index < 16)
+  (
+    live_pad_note_off(
+      pad_index,
+      0
+    );
+
+    pad_index += 1;
+  );
+);
+
+
+
+
+function pulse_mk3_led(cc)
+(
+  cc >= 0
+  &&
+  cc <= 127 ?
+  (
+    gmem[
+      MK3_LED_PULSE_BASE
+      +
+      floor(cc)
+    ] += 1;
+  );
+);
+
+
+@block
+
+block_noteoffs = 0;
+
+while(midirecv(midi_offset, msg1, msg2, msg3))
+(
+  status = msg1 & 0xF0;
+  handled = 0;
+
+  (
+    status == 0x90
+    ||
+    status == 0x80
+  )
+  &&
+  msg2 >= 12
+  &&
+  msg2 <= 111 ?
+  (
+    is_note_on =
+      status == 0x90
+      &&
+      msg3 > 0;
+
+    is_note_off =
+      status == 0x80
+      ||
+      (
+        status == 0x90
+        &&
+        msg3 == 0
+      );
+
+    is_note_off ?
+    (
+      block_noteoffs += 1;
+    );
+
+
+    // ========================================================
+    // MODE-SPECIFIC PAD SHORTCUTS
+    // Priority: SETTINGS > PATTERN > ARRANGER > SCALE EDIT >
+    // SENSITIVITY > VARIATION > FOLLOW > normal pad operation.
+    // ========================================================
+    special_pad_action = 0;
+    special_pad_index = msg2 - 12;
+
+    settings_modifier > 0 && special_pad_index >= 0 && special_pad_index <= 15 ?
+    (
+      is_note_on ? push_hw_event(34, special_pad_index, 0, 0);
+      special_pad_action = 1;
+    )
+    :
+    pattern_length_mode > 0 && special_pad_index >= 0 && special_pad_index <= 15 ?
+    (
+      is_note_on ?
+      (
+        special_pad_index <= 7 ? push_hw_event(41, special_pad_index, 0, 0) : push_hw_event(43, special_pad_index - 8, 0, 0);
+      );
+      special_pad_action = 1;
+    )
+    :
+    pattern_select_mode > 0 && special_pad_index >= 0 && special_pad_index <= 15 ?
+    (
+      is_note_on ? push_hw_event(53, special_pad_index, 0, 0);
+      special_pad_action = 1;
+    )
+    :
+    gmem[ARRANGER_MODE_GMEM] > 0 && special_pad_index >= 0 && special_pad_index <= 15 ?
+    (
+      is_note_on ? push_hw_event(55, special_pad_index, 0, 0);
+      special_pad_action = 1;
+    )
+    :
+    scale_edit_mode > 0 && special_pad_index >= 0 && special_pad_index <= 15 ?
+    (
+      is_note_on && special_pad_index == 0 ? push_hw_event(49, 0, 0, 0);
+      special_pad_action = 1;
+    )
+    :
+    sensitivity_mode > 0 && special_pad_index >= 0 && special_pad_index <= 15 ?
+    (
+      is_note_on && special_pad_index <= 7 ?
+      (
+        push_hw_event(45, special_pad_index, 0, 0);
+      );
+      special_pad_action = 1;
+    )
+    :
+    variation_mode > 0 && special_pad_index >= 0 && special_pad_index <= 15 ?
+    (
+      is_note_on ? push_hw_event(69, special_pad_index, 0, 0);
+      special_pad_action = 1;
+    )
+    :
+    follow_modifier > 0 && (special_pad_index == 0 || special_pad_index == 1) ?
+    (
+      is_note_on ? push_hw_event(special_pad_index == 0 ? 31 : 32, 0, 0, 0);
+      special_pad_action = 1;
+    );
+
+    special_pad_action <= 0 ?
+    (
+
+    // MK3 pads are always tracker-entry pads in V0.45.5.
+    (
+      // ======================================================
+      // NORMAL TRACKER PAD MODE
+      // ======================================================
+      is_note_on ?
+      (
+        direct_bank_mode > 0 ?
+        (
+          // Fixed pads 1-16 are Notes 12..27.
+          fixed_pad =
+            msg2
+            -
+            12;
+
+          fixed_pad >= 0
+          &&
+          fixed_pad <= 11 ?
+          (
+            push_hw_event(
+              1,
+              fixed_pad,
+              msg3,
+              mk3_page
+            );
+          )
+          :
+          fixed_pad == 12 ?
+          (
+            push_hw_event(
+              2,
+              -1,
+              0,
+              mk3_page
+            );
+          )
+          :
+          fixed_pad == 13 ?
+          (
+            push_hw_event(
+              2,
+              1,
+              0,
+              mk3_page
+            );
+          )
+          :
+          fixed_pad == 14 ?
+          (
+            push_hw_event(
+              follow_modifier > 0 ? 23 : 22,
+              -12,
+              0,
+              mk3_page
+            );
+          )
+          :
+          fixed_pad == 15 ?
+          (
+            push_hw_event(
+              follow_modifier > 0 ? 23 : 22,
+              12,
+              0,
+              mk3_page
+            );
+          );
+        )
+        :
+        (
+          // Legacy Pad Page fallback.
+          mk3_page_pending > 0 ?
+          (
+            mk3_page =
+              floor(
+                (msg2 - 12)
+                /
+                12
+              );
+
+            mk3_page =
+              clamp_value(
+                mk3_page,
+                0,
+                7
+              );
+
+            gmem[MK3_PAGE_GMEM] =
+              mk3_page;
+
+            mk3_page_pending = 0;
+
+            raw_base =
+              12
+              +
+              mk3_page * 12;
+
+            pad_index =
+              msg2
+              -
+              raw_base;
+
+            pad_index >= 0
+            &&
+            pad_index <= 11 ?
+            (
+              push_hw_event(
+                1,
+                pad_index,
+                msg3,
+                mk3_page
+              );
+            );
+          )
+          :
+          (
+            raw_base =
+              12
+              +
+              mk3_page * 12;
+
+            msg2 >= raw_base
+            &&
+            msg2 <= raw_base + 11 ?
+            (
+              pad_index =
+                msg2
+                -
+                raw_base;
+
+              push_hw_event(
+                1,
+                pad_index,
+                msg3,
+                mk3_page
+              );
+            )
+            :
+            msg2 == raw_base + 12 ?
+            (
+              push_hw_event(
+                2,
+                -1,
+                0,
+                mk3_page
+              );
+            )
+            :
+            msg2 == raw_base + 13 ?
+            (
+              push_hw_event(
+                2,
+                1,
+                0,
+                mk3_page
+              );
+            )
+            :
+            msg2 == raw_base + 14 ?
+            (
+              push_hw_event(
+                follow_modifier > 0 ? 23 : 22,
+                -12,
+                0,
+                mk3_page
+              );
+            )
+            :
+            msg2 == raw_base + 15 ?
+            (
+              push_hw_event(
+                follow_modifier > 0 ? 23 : 22,
+                12,
+                0,
+                mk3_page
+              );
+            )
+            :
+            (
+              inferred_page =
+                floor(
+                  (msg2 - 12)
+                  /
+                  12
+                );
+
+              inferred_page =
+                clamp_value(
+                  inferred_page,
+                  0,
+                  7
+                );
+
+              inferred_base =
+                12
+                +
+                inferred_page * 12;
+
+              inferred_pad =
+                msg2
+                -
+                inferred_base;
+
+              inferred_pad >= 0
+              &&
+              inferred_pad <= 11 ?
+              (
+                mk3_page =
+                  inferred_page;
+
+                gmem[MK3_PAGE_GMEM] =
+                  mk3_page;
+
+                push_hw_event(
+                  1,
+                  inferred_pad,
+                  msg3,
+                  mk3_page
+                );
+              );
+            );
+          );
+        );
+      );
+    );
+
+    );
+
+    handled = 1;
+  );
+
+
+  status == 0xB0 ?
+  (    // CC41 = SETTINGS hold modifier.
+    //
+    // Controller Editor:
+    //   Mode = Gate, On 127, Off 0
+    //   LED  = For MIDI In
+    //
+    // While held, Pads 1-16 become preference toggles and the
+    // right MK3 display switches to the Settings page.
+    msg2 == 41 ?
+    (
+      settings_modifier =
+        msg3 >= 64;
+
+      gmem[SETTINGS_HELD_GMEM] =
+        settings_modifier;
+
+      push_hw_event(
+        35,
+        settings_modifier,
+        0,
+        0
+      );
+
+      handled = 1;
+    );
+
+
+    // CC8 = 4-D rotary encoder turn.
+    //
+    // V0.45.5 Controller Editor:
+    //   Type = Control Change
+    //   CC   = 8
+    //   Mode = Relative
+    //   Step = 1
+    //
+    // NI Relative mode sends 1 for +1 and 127 for -1.
+    // Relative (Offset) 65/63 is accepted as a convenience too.
+    // Every physical detent therefore produces exactly one tracker unit.
+    msg2 == 8 ?
+    (
+      encoder_delta = 0;
+
+      msg3 == 1 ?
+      (
+        encoder_delta = 1;
+      );
+
+      msg3 == 127 ?
+      (
+        encoder_delta = -1;
+      );
+
+      msg3 == 65 ?
+      (
+        encoder_delta = 1;
+      );
+
+      msg3 == 63 ?
+      (
+        encoder_delta = -1;
+      );
+
+      encoder_delta != 0 ?
+      (
+        push_hw_event(
+          6,
+          encoder_delta,
+          0,
+          0
+        );
+      );
+
+      handled = 1;
+    );
+
+
+    // Top Buttons 1-6 are context-sensitive in ARRANGER mode.
+    // Normal tracker: 1/2 bank, 3/4 CMD-/CMD+, 5 unused, 6 DEFAULT.
+    // ARRANGER: 1/2 timeline back/forward (FOLLOW = zoom out/in),
+    //           3 COPY, 4 PASTE, 5 DUPLICATE, 6 REST.
+    msg2 == 22 ?
+    (
+      msg3 > 0 ?
+      (
+        gmem[ARRANGER_MODE_GMEM] > 0 ?
+          push_hw_event(follow_modifier > 0 ? 62 : 61, -1, 0, 0)
+        : push_hw_event(11, -1, 0, 0);
+        pulse_mk3_led(22);
+      );
+      handled = 1;
+    );
+
+    msg2 == 23 ?
+    (
+      msg3 > 0 ?
+      (
+        gmem[ARRANGER_MODE_GMEM] > 0 ?
+          push_hw_event(follow_modifier > 0 ? 62 : 61, 1, 0, 0)
+        : push_hw_event(11, 1, 0, 0);
+        pulse_mk3_led(23);
+      );
+      handled = 1;
+    );
+
+    msg2 == 24 ?
+    (
+      msg3 > 0 ?
+      (
+        push_hw_event(gmem[ARRANGER_MODE_GMEM] > 0 ? 63 : 52, 0, 0, 0);
+        pulse_mk3_led(24);
+      );
+      handled = 1;
+    );
+
+    msg2 == 25 ?
+    (
+      msg3 > 0 ?
+      (
+        push_hw_event(gmem[ARRANGER_MODE_GMEM] > 0 ? 64 : 21, 0, 0, 0);
+        pulse_mk3_led(25);
+      );
+      handled = 1;
+    );
+
+    msg2 == 26 ?
+    (
+      msg3 > 0 && gmem[ARRANGER_MODE_GMEM] > 0 ?
+      (
+        push_hw_event(65, 0, 0, 0);
+        pulse_mk3_led(26);
+      );
+      handled = 1;
+    );
+
+    msg2 == 27 ?
+    (
+      msg3 > 0 ?
+      (
+        gmem[ARRANGER_MODE_GMEM] > 0 ?
+          push_hw_event(66, 0, 0, 0)
+        :
+        follow_modifier > 0 ?
+          push_hw_event(67, 0, 0, 0)
+        :
+          push_hw_event(51, 0, 0, 0);
+        pulse_mk3_led(27);
+      );
+      handled = 1;
+    );
+
+
+    // CC28 / CC29 = clear current step / current track.
+    msg2 == 28 ?
+    (
+      msg3 > 0 ?
+      (
+        push_hw_event(
+          9,
+          msg3,
+          0,
+          0
+        );
+
+        pulse_mk3_led(28);
+      );
+
+      handled = 1;
+    );
+
+    msg2 == 29 ?
+    (
+      msg3 > 0 ?
+      (
+        push_hw_event(
+          10,
+          msg3,
+          0,
+          0
+        );
+
+        pulse_mk3_led(29);
+      );
+
+      handled = 1;
+    );
+
+
+    // CC30-33 = physical 4-D directions.
+    // In ARRANGER these navigate the 16-track grid. Outside ARRANGER the
+    // established tracker behavior remains Up/Down step movement, with
+    // Left/Right reserved.
+    msg2 == 30 ?
+    (
+      msg3 > 0 ?
+      (
+        gmem[ARRANGER_MODE_GMEM] > 0 ? push_hw_event(57, 0, -1, 0) : push_hw_event(2, -1, 0, 0);
+      );
+      handled = 1;
+    );
+
+    msg2 == 31 ?
+    (
+      msg3 > 0 && gmem[ARRANGER_MODE_GMEM] > 0 ? push_hw_event(57, 1, 0, 0);
+      handled = 1;
+    );
+
+    msg2 == 32 ?
+    (
+      msg3 > 0 ?
+      (
+        gmem[ARRANGER_MODE_GMEM] > 0 ? push_hw_event(57, 0, 1, 0) : push_hw_event(2, 1, 0, 0);
+      );
+      handled = 1;
+    );
+
+    msg2 == 33 ?
+    (
+      msg3 > 0 && gmem[ARRANGER_MODE_GMEM] > 0 ? push_hw_event(57, -1, 0, 0);
+      handled = 1;
+    );
+
+
+    // CC36 = BROWSER. Normal = legacy overview; FOLLOW = Visualiser.
+    msg2 == 36 ?
+    (
+      msg3 > 0 ? push_hw_event(follow_modifier > 0 ? 50 : 54, 0, 0, 0);
+      handled = 1;
+    );
+
+    // CC38 = ARRANGER song-sequence editor.
+    msg2 == 38 ?
+    (
+      msg3 > 0 ? push_hw_event(40, 0, 0, 0);
+      handled = 1;
+    );
+
+    // CC42 / CC43 = current-track MUTE / SOLO. FOLLOW changes
+    // either control into the global clear command.
+    msg2 == 42 ?
+    (
+      msg3 > 0 ? push_hw_event(follow_modifier > 0 ? 46 : 38, 0, 0, 0);
+      handled = 1;
+    );
+
+    msg2 == 43 ?
+    (
+      msg3 > 0 ? push_hw_event(follow_modifier > 0 ? 47 : 39, 0, 0, 0);
+      handled = 1;
+    );
+
+    // CC44 = Sensitivity Mode toggle.
+    msg2 == 44 ?
+    (
+      msg3 > 0 ?
+      (
+        sensitivity_mode = sensitivity_mode > 0 ? 0 : 1;
+        scale_edit_mode = 0;
+        gmem[SENSITIVITY_MODE_GMEM] = sensitivity_mode;
+        gmem[SCALE_EDIT_GMEM] = 0;
+        push_hw_event(44, sensitivity_mode, 0, 0);
+      );
+      handled = 1;
+    );
+
+    // CC47 = TEMPO mode toggle. Lua owns the toggle state.
+    msg2 == 47 ?
+    (
+      msg3 > 0 ? push_hw_event(37, 0, 0, 0);
+      handled = 1;
+    );
+
+    // CC52 = NOTES is intentionally free in V0.45.5.
+    // Consume legacy messages from an older template without entering a mode.
+    msg2 == 52 ?
+    (
+      notes_mode = 0;
+      gmem[NOTES_MODE_GMEM] = 0;
+      handled = 1;
+    );
+
+    // CC53 = RESTART. Lua resets the master phase and starts playback.
+    msg2 == 53 ?
+    (
+      msg3 > 0 ?
+      (
+        push_hw_event(36, 0, 0, 0);
+        pulse_mk3_led(53);
+      );
+      handled = 1;
+    );
+
+
+    // CC57 = Play.
+    msg2 == 57 ?
+    (
+      msg3 > 0 ?
+      (
+        gmem[6] = 0;
+        gmem[0] = 1;
+
+        push_hw_event(
+          4,
+          0,
+          0,
+          0
+        );
+      );
+
+      handled = 1;
+    );
+
+
+    // CC59 = Stop.
+    msg2 == 59 ?
+    (
+      msg3 > 0 ?
+      (
+        gmem[0] = 0;
+        gmem[6] = 1;
+
+        push_hw_event(
+          5,
+          0,
+          0,
+          0
+        );
+      );
+
+      handled = 1;
+    );
+
+
+    // --------------------------------------------------------
+    // MK3 SMALL KNOBS 1-8 - TRACKER ONLY
+    //
+    // Controller Editor V0.35:
+    //   CC70-77
+    //   Mode = Relative
+    //   Step = 1
+    //
+    // The engine deliberately reduces every incoming relative message
+    // to direction only. This removes hidden 0/127 endpoints and
+    // hardware acceleration. Lua supplies the fine/coarse response:
+    //
+    //   normal       = about 2 detents per tracker increment
+    //   hold FOLLOW  = 1 detent per tracker increment
+    // --------------------------------------------------------
+    msg2 >= 70
+    &&
+    msg2 <= 77 ?
+    (
+      knob_index =
+        msg2
+        -
+        70;
+
+      knob_delta = 0;
+
+      // Native Relative: 1 clockwise / 127 anticlockwise.
+      // Also accept the common Relative-Offset 65/63 pair.
+      msg3 == 1
+      ||
+      msg3 == 65
+      ||
+      (
+        msg3 >= 2
+        &&
+        msg3 <= 62
+      ) ?
+      (
+        knob_delta = 1;
+      );
+
+      msg3 == 127
+      ||
+      msg3 == 63
+      ||
+      (
+        msg3 >= 66
+        &&
+        msg3 <= 126
+      ) ?
+      (
+        knob_delta = -1;
+      );
+
+      knob_delta != 0 ?
+      (
+        push_hw_event(
+          13,
+          knob_index + 1,
+          knob_delta,
+          0
+        );
+      );
+
+      handled = 1;
+    );
+
+
+    // --------------------------------------------------------
+    // MK3 SELECT + KNOB TOUCH
+    //
+    // CC90 is now reserved for the physical SELECT button, which
+    // toggles the Jam 8x8 matrix between Select and Note-Toggle mode.
+    //
+    // To avoid the old CC90 collision, only Knob 1 touch moves:
+    //   Knob 1 touch = CC106
+    //   Knob 2 touch = CC91
+    //   ...
+    //   Knob 8 touch = CC97
+    // --------------------------------------------------------
+    msg2 == 90 ?
+    (
+      msg3 > 0 ?
+      (
+        push_hw_event(
+          26,
+          0,
+          0,
+          0
+        );
+      );
+
+      handled = 1;
+    );
+
+
+    msg2 == 106 ?
+    (
+      msg3 > 0 ?
+      (
+        push_hw_event(
+          15,
+          1,
+          msg3,
+          0
+        );
+      );
+
+      handled = 1;
+    );
+
+
+    msg2 >= 91
+    &&
+    msg2 <= 97 ?
+    (
+      msg3 > 0 ?
+      (
+        push_hw_event(
+          15,
+          msg2 - 89,
+          msg3,
+          0
+        );
+      );
+
+      handled = 1;
+    );
+
+
+    // --------------------------------------------------------
+    // CC81 = PAD MODE hardware button, repurposed as NOTE AUDITION toggle.
+    msg2 == 81 ?
+    (
+      msg3 > 0 ? push_hw_event(25, 0, 0, 0);
+      handled = 1;
+    );
+
+    // CC82 = SCALE EDIT toggle.
+    msg2 == 82 ?
+    (
+      msg3 > 0 ?
+      (
+        scale_edit_mode = scale_edit_mode > 0 ? 0 : 1;
+        sensitivity_mode = 0;
+        gmem[SCALE_EDIT_GMEM] = scale_edit_mode;
+        gmem[SENSITIVITY_MODE_GMEM] = 0;
+        push_hw_event(48, scale_edit_mode, 0, 0);
+      );
+      handled = 1;
+    );
+
+
+    // --------------------------------------------------------
+    // CC56 = FOLLOW / SHIFT modifier.
+    //
+    // Controller Editor:
+    //   FOLLOW
+    //   Type = Control Change
+    //   CC   = 56
+    //   Mode = Gate
+    //   On   = 127
+    //   Off  = 0
+    //
+    // V0.29 use:
+    //   Hold FOLLOW + Pad15 / Pad16 to transpose the ACTIVE current
+    //   pattern down / up one octave.
+    //
+    // This is now the shared modifier reserved for additional
+    // hardware shortcuts in later versions.
+    // --------------------------------------------------------
+    msg2 == 56 ?
+    (
+      follow_modifier =
+        msg3 >= 64;
+
+      gmem[FOLLOW_MOD_GMEM] =
+        follow_modifier;
+
+      push_hw_event(
+        24,
+        follow_modifier,
+        0,
+        0
+      );
+
+      handled = 1;
+    );
+
+
+    // --------------------------------------------------------
+    // CC85 = EVENTS.
+    // V0.45.5 releases EVENTS from its old probability-randomise mapping.
+    // The tracker consumes the control so it does not leak an unwanted CC
+    // into instrument routing, but it deliberately performs no action.
+    // --------------------------------------------------------
+    msg2 == 85 ?
+    (
+      handled = 1;
+    );
+
+
+    // --------------------------------------------------------
+    // CC87 = VARIATION mode toggle.
+    // V0.45.5 restores the physical button to the same Trigger behavior
+    // used by the known-working V0.44 template. This deliberately avoids
+    // Gate/release messages from the VARIATION hardware control.
+    // Press once to enter Variation mode; press again to leave it.
+    // --------------------------------------------------------
+    msg2 == 87 ?
+    (
+      msg3 > 0 ?
+      (
+        variation_mode = variation_mode > 0 ? 0 : 1;
+        gmem[VARIATION_MODE_GMEM] = variation_mode;
+        push_hw_event(68, variation_mode, 0, 0);
+      );
+      handled = 1;
+    );
+
+
+    // --------------------------------------------------------
+    // CC107 = legacy V0.45.1 hotfix assignment.
+    // Consume it as a no-op so the old Gate mapping cannot leak through.
+    // --------------------------------------------------------
+    msg2 == 107 ?
+    (
+      handled = 1;
+    );
+
+
+    // --------------------------------------------------------
+    // CC88 = DUPLICATE -> pattern resize.
+    //
+    // DUPLICATE:
+    //   double pattern length, copying the existing phrase into
+    //   the newly-created range, up to 64 steps.
+    //
+    // FOLLOW + DUPLICATE:
+    //   halve current pattern length, minimum 1 step.
+    // --------------------------------------------------------
+    msg2 == 88 ?
+    (
+      msg3 > 0 ?
+      (
+        push_hw_event(
+          27,
+          follow_modifier > 0 ? -1 : 1,
+          0,
+          0
+        );
+
+        pulse_mk3_led(88);
+      );
+
+      handled = 1;
+    );
+
+
+    // --------------------------------------------------------
+    // CC89 = 4-D encoder PUSH.
+    // ARRANGER: enter/exit selected-cell edit mode.
+    // PATTERN SELECT: explicitly make the selected edit pattern audible
+    //                 (quantised to the next pattern boundary while playing).
+    // Otherwise: toggle the normal Step Selector / Note Change mode.
+    // --------------------------------------------------------
+    msg2 == 89 ?
+    (
+      msg3 > 0 ?
+      (
+        gmem[ARRANGER_MODE_GMEM] > 0 ?
+        (
+          push_hw_event(58, 0, 0, 0);
+        )
+        :
+        pattern_select_mode > 0 ?
+        (
+          push_hw_event(60, 0, 0, 0);
+        )
+        :
+        (
+          pattern_length_mode <= 0 ? push_hw_event(30, 0, 0, 0);
+        );
+      );
+
+      handled = 1;
+    );
+
+
+    // CC86 = PATTERN dual hold.
+    // PATTERN alone: Pattern Select slots 1-16.
+    // FOLLOW + PATTERN: Pattern Length / Note Division menu.
+    msg2 == 86 ?
+    (
+      msg3 > 0 ?
+      (
+        follow_modifier > 0 ?
+        (
+          pattern_length_mode = 1;
+          pattern_select_mode = 0;
+          gmem[PATTERN_MODE_GMEM] = 1;
+          gmem[PATTERN_SELECT_MODE_GMEM] = 0;
+          push_hw_event(16, 1, 0, 0);
+        )
+        :
+        (
+          pattern_length_mode = 0;
+          pattern_select_mode = 1;
+          gmem[PATTERN_MODE_GMEM] = 0;
+          gmem[PATTERN_SELECT_MODE_GMEM] = 1;
+          push_hw_event(56, 1, 0, 0);
+        );
+      )
+      :
+      (
+        pattern_length_mode > 0 ? push_hw_event(16, 0, 0, 0);
+        pattern_select_mode > 0 ? push_hw_event(56, 0, 0, 0);
+        pattern_length_mode = 0;
+        pattern_select_mode = 0;
+        gmem[PATTERN_MODE_GMEM] = 0;
+        gmem[PATTERN_SELECT_MODE_GMEM] = 0;
+      );
+      handled = 1;
+    );
+
+    // MK3 Group A-H direct bank selection.
+    // Recommended mapping:
+    // A=CC98 ... H=CC105, Trigger value 127.
+    msg2 >= 98
+    &&
+    msg2 <= 105 ?
+    (
+      msg3 > 0 ?
+      (
+        direct_bank_mode = 1;
+
+        mk3_page =
+          msg2
+          -
+          98;
+
+        mk3_page =
+          clamp_value(
+            mk3_page,
+            0,
+            7
+          );
+
+        gmem[MK3_PAGE_GMEM] =
+          mk3_page;
+
+        gmem[DIRECT_BANK_MODE_GMEM] =
+          1;
+
+        push_hw_event(
+          17,
+          mk3_page,
+          0,
+          0
+        );
+      );
+
+      handled = 1;
+    );
+
+
+    // CC80 = Fixed Velocity.
+    msg2 == 80 ?
+    (
+      msg3 > 0 ?
+      (
+        push_hw_event(
+          8,
+          msg3,
+          0,
+          0
+        );
+      );
+
+      handled = 1;
+    );
+
+
+    // CC83 = Quick / Lock.
+    msg2 == 83 ?
+    (
+      msg3 > 0 ?
+      (
+        push_hw_event(
+          7,
+          msg3,
+          0,
+          0
+        );
+      );
+
+      handled = 1;
+    );
+
+
+    // CC84 (CHORDS / former INST LOCK) is free/unused in V0.45.5.
+    msg2 == 84 ?
+    (
+      handled = 1;
+    );
+  );
+
+
+  handled == 0 ?
+  (
+    midisend(
+      midi_offset,
+      msg1,
+      msg2,
+      msg3
+    );
+  );
+);
+
+
+block_noteoffs >= 12 ?
+(
+  mk3_page_pending = 1;
+);
+
+
+playing = gmem[0];
+bpm = gmem[1];
+pattern_length = floor(gmem[7]);
+pattern_length_mode = gmem[PATTERN_MODE_GMEM] > 0;
+
+bpm <= 0 ?
+(
+  bpm = 120;
+);
+
+pattern_length < 1 ? pattern_length = 16;
+pattern_length > MAX_STEPS ? pattern_length = MAX_STEPS;
+
+// Master timing quantum = 1/128 note.
+base_tick_samples =
+  (60 / bpm)
+  *
+  0.03125
+  *
+  srate;
+
+// LEN unit remains one 1/16 note irrespective of pattern resolution.
+sixteenth_samples =
+  (60 / bpm)
+  *
+  0.25
+  *
+  srate;
+
+
+gmem[6] > 0 ?
+(
+  stop_all_voices();
+  stop_all_live_pads();
+  clear_rolls();
+  clear_pending_notes();
+  clear_active_display();
+  gmem[6] = 0;
+);
+
+direct_audition_trigger_now = floor(gmem[DIRECT_AUDITION_TRIGGER_GMEM]);
+direct_audition_trigger_now != direct_audition_last_trigger ?
+(
+  direct_audition_last_trigger = direct_audition_trigger_now;
+
+  direct_audition_active > 0 ?
+  (
+    midisend(0, 0x80 | direct_audition_channel, direct_audition_note, 0);
+    direct_audition_active = 0;
+  );
+
+  gmem[DIRECT_AUDITION_ON_GMEM] > 0 ?
+  (
+    direct_audition_note = clamp_value(floor(gmem[DIRECT_AUDITION_NOTE_GMEM]), 0, 127);
+    direct_audition_channel = clamp_value(floor(gmem[DIRECT_AUDITION_CHANNEL_GMEM]), 0, 15);
+    direct_audition_velocity = clamp_value(floor(gmem[DIRECT_AUDITION_VELOCITY_GMEM]), 1, 127);
+    midisend(0, 0x90 | direct_audition_channel, direct_audition_note, direct_audition_velocity);
+    direct_audition_active = 1;
+  );
+);
+
+restart_happened = 0;
+restart_trigger = floor(gmem[RESTART_TRIGGER_GMEM]);
+
+restart_trigger != restart_last_trigger ?
+(
+  stop_all_voices();
+  clear_rolls();
+  clear_pending_notes();
+  clear_active_display();
+
+  master_tick_position = 0;
+  gmem[ARRANGER_SONG_TICK_GMEM] = 0;
+  selected_track = floor(gmem[CURRENT_TRACK_GMEM]);
+  selected_track = clamp_value(selected_track, 1, 16) - 1;
+  initialise_track_steps(0, selected_track);
+  clock_samples = 0;
+
+  playing > 0 ?
+  (
+    play_current_track_steps(0);
+  );
+
+  restart_last_trigger = restart_trigger;
+  restart_happened = 1;
+);
+
+
+audition_trigger =
+  floor(
+    gmem[
+      AUDITION_TRIGGER_GMEM
+    ]
+  );
+
+audition_trigger != audition_last_trigger ?
+(
+  stop_audition_voices();
+
+  audition_note =
+    clamp_value(
+      floor(
+        gmem[
+          AUDITION_NOTE_GMEM
+        ]
+      ),
+      0,
+      127
+    );
+
+  audition_velocity =
+    clamp_value(
+      floor(
+        gmem[
+          AUDITION_VELOCITY_GMEM
+        ]
+      ),
+      1,
+      127
+    );
+
+  audition_channel =
+    clamp_value(
+      floor(
+        gmem[
+          AUDITION_CHANNEL_GMEM
+        ]
+      ),
+      0,
+      15
+    );
+
+  audition_gate_ms =
+    clamp_value(
+      gmem[
+        AUDITION_GATE_MS_GMEM
+      ],
+      20,
+      500
+    );
+
+  start_note_samples(
+    audition_note,
+    audition_velocity,
+    audition_channel,
+    srate * audition_gate_ms / 1000,
+    0,
+    -1,
+    -1
+  );
+
+  audition_last_trigger =
+    audition_trigger;
+);
+
+
+process_rolls();
+process_pending_notes();
+
+
+v = 0;
+
+while(v < MAX_VOICES)
+(
+  gmem[VOICE_ACTIVE_BASE + v] > 0 ?
+  (
+    voice_track =
+      floor(
+        gmem[
+          VOICE_TRACK_BASE + v
+        ]
+      );
+
+    // Mute/Solo changes also stop notes that are already sounding.
+    voice_track >= 0
+    &&
+    voice_track < NUM_TRACKS
+    &&
+    (
+      gmem[
+        TRACK_MUTE_BASE + voice_track
+      ] > 0
+      ||
+      (
+        gmem[ANY_SOLO_GMEM] > 0
+        &&
+        gmem[
+          TRACK_SOLO_BASE + voice_track
+        ] <= 0
+      )
+    ) ?
+    (
+      stop_voice(
+        v,
+        0
+      );
+    )
+    :
+    (
+      remaining =
+        gmem[
+          VOICE_REMAIN_BASE + v
+        ];
+
+      remaining <= samplesblock ?
+      (
+        stop_voice(
+          v,
+          max(0, remaining)
+        );
+      )
+      :
+      (
+        gmem[
+          VOICE_REMAIN_BASE + v
+        ] =
+          remaining
+          -
+          samplesblock;
+      );
+    );
+  );
+
+  v += 1;
+);
+
+
+playing > 0
+&&
+was_playing <= 0
+&&
+restart_happened <= 0 ?
+(
+  current_step = floor(gmem[3]);
+  current_step = clamp_value(current_step, 0, MAX_STEPS - 1);
+
+  selected_track = floor(gmem[CURRENT_TRACK_GMEM]);
+  selected_track = clamp_value(selected_track, 1, 16) - 1;
+
+  clear_rolls();
+  clear_pending_notes();
+  initialise_track_steps(
+    current_step,
+    selected_track
+  );
+
+  clock_samples = 0;
+  play_current_track_steps(0);
+);
+
+
+playing <= 0
+&&
+was_playing > 0 ?
+(
+  stop_all_voices();
+  clear_rolls();
+  clear_pending_notes();
+  clear_active_display();
+  clock_samples = 0;
+);
+
+
+playing > 0 ?
+(
+  block_position = 0;
+  block_remaining = samplesblock;
+
+  while(
+    clock_samples
+    +
+    block_remaining
+    >=
+    base_tick_samples
+  )
+  (
+    samples_until_step =
+      base_tick_samples
+      -
+      clock_samples;
+
+    block_position += samples_until_step;
+    block_remaining -= samples_until_step;
+
+    advance_master_tick_and_play(block_position);
+    clock_samples = 0;
+  );
+
+  clock_samples += block_remaining;
+);
+
+
+was_playing = playing;
+
+selected_track =
+  floor(
+    gmem[
+      CURRENT_TRACK_GMEM
+    ]
+  );
+
+selected_track =
+  clamp_value(
+    selected_track,
+    1,
+    16
+  );
+
+current_step =
+  floor(
+    gmem[
+      TRACK_PLAYSTEP_BASE
+      +
+      selected_track
+      -
+      1
+    ]
+  );
+
+gmem[3] = current_step;
+
+update_active_display();
