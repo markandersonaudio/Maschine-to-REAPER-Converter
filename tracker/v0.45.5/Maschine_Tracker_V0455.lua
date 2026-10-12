@@ -998,10 +998,6 @@ function command_name(command)
         [7] = "O2",
         [8] = "O3",
         [9] = "O4"
-No readable content was found in this file for the requested mode.
-No readable content was found in this file for the requested mode.
-No readable content was found in this file for the requested mode.
-No readable content was found in this file for the requested mode.
     }
     return names[command] or "-"
 end
@@ -2002,6 +1998,1006 @@ function move_arranger_position(delta)
         else
             target = arranger_edit_tick + arranger_default_duration_ticks(track_index)
         end
+    else
+        local extent = arranger_track_extent_ticks(track_index)
+        if not exists and arranger_edit_tick > extent then
+            target = math.max(extent, arranger_edit_tick - arranger_default_duration_ticks(track_index))
+        elseif arranger_edit_tick > start_tick then
+            target = start_tick
+        elseif pos > 1 then
+            target = arranger_position_start_tick(track_index, pos - 1)
+        else
+            target = 0
+        end
+    end
+
+    arranger_set_edit_tick(target)
+    arranger_cell_edit_mode = false
+    return true
+end
+
+
+function move_arranger_cursor(delta)
+    return move_arranger_position(delta)
+end
+
+
+function move_arranger_grid(dx, dy)
+    if not arranger_mode then return false end
+    dx = clamp(math.floor(dx or 0), -1, 1)
+    dy = clamp(math.floor(dy or 0), -1, 1)
+
+    local position_delta
+    local track_delta
+    if arranger_view_vertical then
+        track_delta = dx
+        position_delta = dy
+    else
+        position_delta = dx
+        track_delta = dy
+    end
+
+    if track_delta ~= 0 then
+        local previous_track = current_track
+        current_track = clamp(current_track + track_delta, 1, NUM_TRACKS)
+        if current_track ~= previous_track then
+            reset_track_edit_view()
+            sync_tracker_alias(current_track)
+            sync_selected_pattern_length()
+            reaper.gmem_write(CURRENT_TRACK_GMEM, current_track)
+            sync_arranger_edit_position(current_track)
+        end
+    end
+
+    if position_delta ~= 0 then
+        move_arranger_position(position_delta)
+    end
+
+    arranger_cell_edit_mode = false
+    publish_mk3_led_modes()
+    return true
+end
+
+
+function toggle_arranger_cell_edit_mode()
+    if not arranger_mode then return false end
+    sync_arranger_edit_position(current_track)
+    arranger_cell_edit_mode = not arranger_cell_edit_mode
+    dismiss_tutorial()
+    return true
+end
+
+
+function arranger_cell_value(track_index, position)
+    track_index = clamp(math.floor(track_index or current_track), 1, NUM_TRACKS)
+    if position == nil then
+        position = select(1, arranger_resolve_tick(track_index, arranger_edit_tick))
+    end
+    position = clamp(math.floor(position or 1), 1, MAX_ARRANGER_STEPS)
+    local value = (arranger_sequences[track_index] or {})[position]
+    return value == nil and ARRANGER_EMPTY or value
+end
+
+
+function copy_arranger_cell()
+    if not arranger_mode then return false end
+    local track_index = current_track
+    local pos = select(1, arranger_resolve_tick(track_index, arranger_edit_tick))
+    local slot = arranger_cell_value(track_index, pos)
+    local length, division
+    if slot <= 0 then
+        length = clamp(math.floor((arranger_rest_lengths[track_index] or {})[pos] or select(1, default_rest_metadata(track_index))), 1, MAX_STEPS)
+        division = normalize_step_division((arranger_rest_divisions[track_index] or {})[pos] or select(2, default_rest_metadata(track_index)))
+    end
+    arranger_clipboard = {slot=slot, length=length, division=division}
+    return true
+end
+
+
+function paste_arranger_cell()
+    if not arranger_mode or not arranger_clipboard then return false end
+    local track_index = current_track
+    if arranger_clipboard.slot >= 1 and not pattern_created[track_index][arranger_clipboard.slot] then return false end
+    local pos, cell_start = arranger_materialize_edit_target(track_index)
+    if not pos then return false end
+    arranger_sequences[track_index][pos] = arranger_clipboard.slot
+    if arranger_clipboard.slot <= 0 then
+        set_arranger_rest_metadata(track_index, pos, arranger_clipboard.length, arranger_clipboard.division)
+    else
+        arranger_rest_lengths[track_index][pos] = nil
+        arranger_rest_divisions[track_index][pos] = nil
+    end
+    arranger_set_edit_tick(cell_start or arranger_edit_tick)
+    publish_arranger_track(track_index)
+    save_arranger_state(track_index, true)
+    return true
+end
+
+
+function duplicate_arranger_cell()
+    if not arranger_mode then return false end
+    if not copy_arranger_cell() then return false end
+    move_arranger_position(1)
+    return paste_arranger_cell()
+end
+
+
+function insert_arranger_rest()
+    if not arranger_mode then return false end
+    local track_index = current_track
+    local pos, cell_start = arranger_resolve_tick(track_index, arranger_edit_tick)
+    local slot = arranger_cell_value(track_index, pos)
+    local length, division
+    if slot >= 1 then
+        length = pattern_lengths[track_index][slot] or 16
+        division = pattern_divisions[track_index][slot] or DEFAULT_STEP_DIVISION
+    elseif (arranger_sequences[track_index] or {})[pos] ~= nil then
+        length = (arranger_rest_lengths[track_index] or {})[pos]
+        division = (arranger_rest_divisions[track_index] or {})[pos]
+    end
+    if not length then length, division = default_rest_metadata(track_index) end
+    local target_pos = pos
+    if (arranger_sequences[track_index] or {})[pos] == nil then
+        target_pos, cell_start = arranger_materialize_edit_target(track_index)
+    end
+    arranger_sequences[track_index][target_pos] = 0
+    set_arranger_rest_metadata(track_index, target_pos, length, division)
+    arranger_set_edit_tick(cell_start or arranger_edit_tick)
+    publish_arranger_track(track_index)
+    save_arranger_state(track_index, true)
+    return true
+end
+
+
+function remove_arranger_entry()
+    if not arranger_mode then return false end
+    local sequence = arranger_sequences[current_track]
+    local pos, cell_start = arranger_resolve_tick(current_track, arranger_edit_tick)
+    local slot = sequence[pos]
+    if slot == nil or slot == ARRANGER_EMPTY then return true end
+
+    if slot == 0 then
+        sequence[pos] = ARRANGER_EMPTY
+    else
+        local rest_length = clamp(math.floor(pattern_lengths[current_track][slot] or 16), 1, MAX_STEPS)
+        local rest_division = normalize_step_division(pattern_divisions[current_track][slot] or DEFAULT_STEP_DIVISION)
+        sequence[pos] = 0
+        set_arranger_rest_metadata(current_track, pos, rest_length, rest_division)
+    end
+    arranger_set_edit_tick(cell_start or arranger_edit_tick)
+    publish_arranger_track(current_track)
+    save_arranger_state(current_track, true)
+    return true
+end
+
+
+function clear_arranger_sequence()
+    if not arranger_mode then return false end
+    arranger_sequences[current_track] = {}
+    arranger_rest_lengths[current_track] = {}
+    arranger_rest_divisions[current_track] = {}
+    arranger_set_edit_tick(0)
+    arranger_cell_edit_mode = false
+    reaper.gmem_write(TRACK_ACTIVE_REST_BASE + current_track - 1, 1)
+    reaper.gmem_write(ARRANGER_PLAY_POS_BASE + current_track - 1, -1)
+    publish_arranger_track(current_track)
+    save_arranger_state(current_track, true)
+    return true
+end
+
+
+function change_arranger_zoom(delta)
+    if not arranger_mode then return false end
+    arranger_zoom_level = clamp(arranger_zoom_level + (delta < 0 and -1 or 1), 1, 5)
+    return true
+end
+
+
+function capture_history_snapshot()
+
+    local snapshot = {
+        tracks = {},
+        lengths = {},
+        divisions = {},
+        arrangers = {},
+        arranger_edits = {},
+        arranger_edit_tick = arranger_edit_tick
+    }
+
+    local key_parts = {}
+
+    for track_index = 1, NUM_TRACKS do
+
+        local track_text =
+            serialize_track(
+                track_index
+            )
+
+        local track_length =
+            clamp(
+                math.floor(
+                    track_pattern_length[
+                        track_index
+                    ]
+                    or
+                    16
+                ),
+                1,
+                MAX_STEPS
+            )
+
+        snapshot.tracks[
+            track_index
+        ] =
+            track_text
+
+        snapshot.lengths[
+            track_index
+        ] =
+            track_length
+
+        local track_division =
+            normalize_step_division(
+                track_step_division[track_index]
+                or
+                DEFAULT_STEP_DIVISION
+            )
+
+        snapshot.divisions[track_index] =
+            track_division
+
+        snapshot.arrangers[track_index] = serialize_arranger_state(track_index)
+        snapshot.arranger_edits[track_index] = arranger_edit_position[track_index] or 1
+
+        key_parts[
+            #key_parts + 1
+        ] =
+            tostring(track_length)
+            ..
+            ":"
+            ..
+            tostring(track_division)
+            ..
+            ":"
+            ..
+            track_text
+            .. ":A:" .. snapshot.arrangers[track_index]
+    end
+
+    snapshot.key =
+        table.concat(
+            key_parts,
+            "|"
+        )
+
+    return snapshot
+end
+
+
+function push_history_snapshot(
+    stack,
+    snapshot
+)
+
+    if not snapshot then
+        return
+    end
+
+    stack[
+        #stack + 1
+    ] =
+        snapshot
+
+    while #stack >
+        UNDO_HISTORY_LIMIT
+    do
+
+        table.remove(
+            stack,
+            1
+        )
+    end
+end
+
+
+function commit_history_state()
+
+    if history_restoring then
+        return
+    end
+
+    local snapshot =
+        capture_history_snapshot()
+
+    if not history_current_snapshot then
+
+        history_current_snapshot =
+            snapshot
+
+        return
+    end
+
+    if snapshot.key ==
+        history_current_snapshot.key
+    then
+        return
+    end
+
+    push_history_snapshot(
+        undo_history,
+        history_current_snapshot
+    )
+
+    history_current_snapshot =
+        snapshot
+
+    -- Any new edit starts a new branch.
+    redo_history = {}
+end
+
+
+function restore_history_snapshot(snapshot)
+
+    if not snapshot then
+        return false
+    end
+
+    history_restoring =
+        true
+
+    for track_index = 1, NUM_TRACKS do
+
+        local restored =
+            parse_track_string(
+                snapshot.tracks[
+                    track_index
+                ]
+            )
+
+        if restored then
+            local slot = selected_pattern(track_index)
+            pattern_store[track_index][slot] = restored
+            tracker[track_index] = restored
+        end
+
+        track_pattern_length[
+            track_index
+        ] =
+            clamp(
+                math.floor(
+                    snapshot.lengths[track_index]
+                    or
+                    16
+                ),
+                1,
+                MAX_STEPS
+            )
+
+        track_step_division[track_index] =
+            normalize_step_division(
+                snapshot.divisions
+                and snapshot.divisions[track_index]
+                or DEFAULT_STEP_DIVISION
+            )
+
+        local slot = selected_pattern(track_index)
+        pattern_lengths[track_index][slot] = track_pattern_length[track_index]
+        pattern_divisions[track_index][slot] = track_step_division[track_index]
+        write_pattern_metadata(track_index, slot)
+    end
+
+    for track_index = 1, NUM_TRACKS do
+        restore_arranger_serialized(track_index, snapshot.arrangers and snapshot.arrangers[track_index] or "")
+        arranger_edit_position[track_index] = clamp(math.floor((snapshot.arranger_edits and snapshot.arranger_edits[track_index]) or 1), 1, MAX_ARRANGER_STEPS)
+        publish_arranger_track(track_index)
+        save_arranger_state(track_index, false)
+    end
+    arranger_set_edit_tick(snapshot.arranger_edit_tick or 0)
+    arranger_cell_edit_mode = false
+
+    sync_selected_pattern_length()
+
+    if step_wrapping
+        and
+        current_step > pattern_length
+    then
+
+        current_step =
+            pattern_length
+    end
+
+    -- Stop any already-sounding sequenced/audition notes before the
+    -- restored pattern becomes audible.
+    reaper.gmem_write(
+        6,
+        1
+    )
+
+    for track_index = 1, NUM_TRACKS do
+
+        for step = 1, MAX_STEPS do
+
+            write_cell(
+                track_index,
+                step
+            )
+        end
+
+        reaper.gmem_write(
+            TRACK_PATTERN_LENGTH_BASE + track_index - 1,
+            track_pattern_length[track_index]
+        )
+
+        reaper.gmem_write(
+            TRACK_STEP_DIV_BASE + track_index - 1,
+            track_step_division[track_index]
+        )
+
+        save_track_state(
+            track_index,
+            false
+        )
+    end
+
+    reaper.gmem_write(
+        7,
+        pattern_length
+    )
+
+    save_track_lengths_state(false)
+    save_track_resolutions_state(false)
+
+    reaper.MarkProjectDirty(0)
+
+    history_restoring =
+        false
+
+    return true
+end
+
+
+function undo_edit()
+
+    if #undo_history <= 0 then
+        return
+    end
+
+    local target =
+        table.remove(
+            undo_history
+        )
+
+    push_history_snapshot(
+        redo_history,
+        history_current_snapshot
+        or
+        capture_history_snapshot()
+    )
+
+    if restore_history_snapshot(
+        target
+    )
+    then
+
+        history_current_snapshot =
+            target
+    end
+end
+
+
+function redo_edit()
+
+    if #redo_history <= 0 then
+        return
+    end
+
+    local target =
+        table.remove(
+            redo_history
+        )
+
+    push_history_snapshot(
+        undo_history,
+        history_current_snapshot
+        or
+        capture_history_snapshot()
+    )
+
+    if restore_history_snapshot(
+        target
+    )
+    then
+
+        history_current_snapshot =
+            target
+    end
+end
+
+
+function clean_track_name(name)
+
+    name =
+        tostring(
+            name
+            or
+            ""
+        )
+
+    name =
+        string.gsub(
+            name,
+            "[\r\n|]",
+            " "
+        )
+
+    name =
+        string.gsub(
+            name,
+            "^%s+",
+            ""
+        )
+
+    name =
+        string.gsub(
+            name,
+            "%s+$",
+            ""
+        )
+
+    if name == "" then
+        return nil
+    end
+
+    return name
+end
+
+
+function find_tracker_source_reaper_track()
+    local count = reaper.CountTracks(0)
+    for track_index = 0, count - 1 do
+        local tr = reaper.GetTrack(0, track_index)
+        local fx_count = reaper.TrackFX_GetCount(tr)
+        for fx_index = 0, fx_count - 1 do
+            local ok, fx_name = reaper.TrackFX_GetFXName(tr, fx_index, "")
+            if ok and string.find(string.lower(fx_name), "maschine tracker midi engine", 1, true) then
+                return tr
+            end
+        end
+    end
+    return nil
+end
+
+function unique_midi_channel_route_map(routes, field_name)
+    local mapped = {}
+    local valid_count = 0
+    for _, route in ipairs(routes) do
+        local channel = route[field_name]
+        if channel and channel >= 1 and channel <= NUM_TRACKS then
+            if mapped[channel] then return nil end
+            mapped[channel] = route.destination
+            valid_count = valid_count + 1
+        end
+    end
+    return valid_count > 0 and mapped or nil
+end
+
+function refresh_reaper_track_names(force)
+    local now = reaper.time_precise()
+    if not force and now - last_track_name_refresh < TRACK_NAME_REFRESH_SECONDS then return end
+    last_track_name_refresh = now
+
+    local new_names = {}
+    for track_index = 1, NUM_TRACKS do new_names[track_index] = string.format("Track %02d", track_index) end
+    local source_track = find_tracker_source_reaper_track()
+    if source_track then
+        local routes = {}
+        local send_count = reaper.GetTrackNumSends(source_track, 0)
+        for send_index = 0, send_count - 1 do
+            local midi_flags = math.floor(reaper.GetTrackSendInfo_Value(source_track, 0, send_index, "I_MIDIFLAGS") or 0)
+            local destination_track = reaper.GetTrackSendInfo_Value(source_track, 0, send_index, "P_DESTTRACK")
+            if destination_track then
+                routes[#routes + 1] = {
+                    destination = destination_track,
+                    source_channel = midi_flags & 31,
+                    destination_channel = (midi_flags >> 5) & 31,
+                }
+            end
+        end
+        local route_map = unique_midi_channel_route_map(routes, "source_channel")
+            or unique_midi_channel_route_map(routes, "destination_channel")
+        if route_map then
+            for track_index = 1, NUM_TRACKS do
+                local destination_track = route_map[track_index]
+                if destination_track then
+                    local ok, destination_name = reaper.GetTrackName(destination_track)
+                    destination_name = ok and clean_track_name(destination_name) or nil
+                    if destination_name then new_names[track_index] = destination_name end
+                end
+            end
+        else
+            for track_index = 1, math.min(NUM_TRACKS, #routes) do
+                local ok, destination_name = reaper.GetTrackName(routes[track_index].destination)
+                destination_name = ok and clean_track_name(destination_name) or nil
+                if destination_name then new_names[track_index] = destination_name end
+            end
+        end
+    end
+    track_names = new_names
+end
+
+
+function current_track_name()
+
+    return
+        track_names[
+            current_track
+        ]
+        or
+        string.format(
+            "Track %02d",
+            current_track
+        )
+end
+
+
+function any_tracker_solo()
+
+    for track_index = 1, NUM_TRACKS do
+
+        if track_solo[
+            track_index
+        ]
+        then
+            return true
+        end
+    end
+
+    return false
+end
+
+
+function any_tracker_mute()
+
+    for track_index = 1, NUM_TRACKS do
+        if track_muted[track_index] then
+            return true
+        end
+    end
+
+    return false
+end
+
+
+function write_mute_summary_gmem()
+
+    reaper.gmem_write(
+        ANY_MUTE_GMEM,
+        any_tracker_mute()
+        and
+        1
+        or
+        0
+    )
+end
+
+
+function write_solo_summary_gmem()
+
+    reaper.gmem_write(
+        ANY_SOLO_GMEM,
+        any_tracker_solo()
+        and
+        1
+        or
+        0
+    )
+end
+
+
+function serialize_mix()
+
+    local values = {}
+
+    for track_index = 1, NUM_TRACKS do
+
+        values[#values + 1] =
+            track_muted[track_index]
+            and
+            1
+            or
+            0
+
+        values[#values + 1] =
+            clamp(
+                math.floor(
+                    track_volume[track_index]
+                ),
+                0,
+                127
+            )
+
+        values[#values + 1] =
+            track_solo[track_index]
+            and
+            1
+            or
+            0
+    end
+
+    return table.concat(
+        values,
+        ","
+    )
+end
+
+
+function save_mix_state(mark_dirty)
+
+    local data =
+        serialize_mix()
+
+    if data ~= last_saved_mix then
+
+        reaper.SetProjExtState(
+            0,
+            PROJECT_EXT_SECTION,
+            "mix",
+            data
+        )
+
+        last_saved_mix =
+            data
+    end
+
+    if mark_dirty then
+        reaper.MarkProjectDirty(0)
+    end
+end
+
+
+function serialize_track_lengths()
+
+    local values = {}
+
+    for track_index = 1, NUM_TRACKS do
+
+        values[#values + 1] =
+            clamp(
+                math.floor(
+                    track_pattern_length[
+                        track_index
+                    ]
+                    or
+                    16
+                ),
+                1,
+                MAX_STEPS
+            )
+    end
+
+    return table.concat(
+        values,
+        ","
+    )
+end
+
+
+function save_track_lengths_state(mark_dirty)
+
+    local data =
+        serialize_track_lengths()
+
+    if data ~= last_saved_lengths then
+
+        reaper.SetProjExtState(
+            0,
+            PROJECT_EXT_SECTION,
+            "lengths",
+            data
+        )
+
+        last_saved_lengths =
+            data
+    end
+
+    -- Preserve the legacy single-length metadata field for
+    -- backwards compatibility with older tracker versions.
+    save_meta_state(false)
+
+    if mark_dirty then
+        reaper.MarkProjectDirty(0)
+
+        commit_history_state()
+    end
+end
+
+
+function serialize_track_resolutions()
+
+    local values = {}
+
+    for track_index = 1, NUM_TRACKS do
+        values[#values + 1] =
+            normalize_step_division(
+                track_step_division[track_index]
+                or
+                DEFAULT_STEP_DIVISION
+            )
+    end
+
+    return table.concat(values, ",")
+end
+
+
+function save_track_resolutions_state(mark_dirty)
+
+    local data = serialize_track_resolutions()
+
+    if data ~= last_saved_resolutions then
+        reaper.SetProjExtState(
+            0,
+            PROJECT_EXT_SECTION,
+            "resolutions",
+            data
+        )
+        last_saved_resolutions = data
+    end
+
+    if mark_dirty then
+        reaper.MarkProjectDirty(0)
+        commit_history_state()
+    end
+end
+
+
+function serialize_meta()
+
+    return table.concat(
+        {
+            PROJECT_STATE_VERSION,
+            pattern_length,
+            quick_step_mode and 1 or 0,
+            fixed_velocity and 1 or 0,
+            step_wrapping and 1 or 0,
+            entry_octave,
+            default_velocity,
+            default_pan,
+            default_length,
+            default_probability,
+            0, -- legacy INST Lock slot; always off from V0.45.5
+            jam_track_bank,
+            jam_select_mode and 1 or 0,
+            jam_group_solo_mode and 1 or 0,
+            note_audition_enabled and 1 or 0,
+            playhead_follow_enabled and 1 or 0,
+            bank_nav_relative and 1 or 0,
+            jam_step_bank,
+            scale_lock_enabled and 1 or 0,
+            scale_root,
+            scale_index
+        },
+        ","
+    )
+end
+
+
+function save_meta_state(mark_dirty)
+
+    local meta =
+        serialize_meta()
+
+    if meta ~= last_saved_meta then
+
+        reaper.SetProjExtState(
+            0,
+            PROJECT_EXT_SECTION,
+            "meta",
+            meta
+        )
+
+        last_saved_meta =
+            meta
+    end
+
+    if mark_dirty then
+        reaper.MarkProjectDirty(0)
+    end
+end
+
+
+function save_track_state(
+    track_index,
+    mark_dirty
+)
+
+    -- Ensure metadata exists even if the first change in a new
+    -- project is a note edit.
+    save_meta_state(false)
+
+    local slot = selected_pattern(track_index)
+    local data = serialize_track(track_index, slot)
+    local save_key = slot == 1
+        and string.format("track%02d", track_index)
+        or string.format("track%02d_pattern%02d", track_index, slot)
+    local cache_key = string.format("%02d:%02d", track_index, slot)
+
+    if data ~= last_saved_tracks[cache_key] then
+        reaper.SetProjExtState(0, PROJECT_EXT_SECTION, save_key, data)
+        last_saved_tracks[cache_key] = data
+    end
+    save_pattern_meta_state(track_index)
+
+    if mark_dirty then
+        reaper.MarkProjectDirty(0)
+
+        commit_history_state()
+    end
+end
+
+
+function load_project_state()
+
+    local retval, meta =
+        reaper.GetProjExtState(
+            0,
+            PROJECT_EXT_SECTION,
+            "meta"
+        )
+
+    if retval <= 0
+        or
+        meta == ""
+    then
+        return false
+    end
+
+    local values = {}
+
+    for value_text in string.gmatch(
+        meta,
+        "([^,]+)"
+    ) do
+
+        values[#values + 1] =
+            tonumber(value_text)
+    end
+
+    local source_version = math.floor(values[1] or 0)
+
+    if #values < 10
+        or
+        (source_version ~= 1 and source_version ~= 2 and source_version ~= 3 and source_version ~= PROJECT_STATE_VERSION)
+    then
+        return false
+    end
+
+    pattern_length = clamp(
+        math.floor(values[2]),
+        1,
+        MAX_STEPS
+    )
+
+    -- Older projects had one global pattern length. Use it as the
+    -- default for every track before loading the optional V0.24 lengths.
+    for track_index = 1, NUM_TRACKS do
+        track_pattern_length[track_index] =
+            pattern_length
+    end
+
+    quick_step_mode =
+        values[3] ~= 0
+
+    fixed_velocity =
+        values[4] ~= 0
+
+    step_wrapping =
+        values[5] ~= 0
+
+    entry_octave = clamp(
+        math.floor(values[6]),
+        -1,
+        8
+    )
     default_velocity = clamp(
         math.floor(values[7]),
         1,
@@ -4000,6 +4996,2005 @@ function toggle_jam_step_note(step)
         current_track,
         true
     )
+    audition_note(c.note, c.velocity, current_track)
+end
+
+
+function handle_jam_matrix_step(step)
+
+    if jam_select_mode then
+
+        select_jam_step(
+            step
+        )
+
+    else
+
+        toggle_jam_step_note(
+            step
+        )
+    end
+end
+
+
+function select_jam_step(step)
+
+    current_step =
+        clamp(
+            step,
+            1,
+            MAX_STEPS
+        )
+
+    update_scroll()
+end
+
+
+function reset_track_edit_view()
+    -- V0.45.5 usability rule: every track change returns editing/view to Bank 1, Step 1.
+    current_step = 1
+    scroll_step = 1
+end
+
+
+function select_jam_track(track_index)
+
+    local previous_track = current_track
+    current_track =
+        clamp(
+            track_index,
+            1,
+            NUM_TRACKS
+        )
+
+    if current_track ~= previous_track then reset_track_edit_view() end
+    reaper.gmem_write(CURRENT_TRACK_GMEM, current_track)
+    sync_tracker_alias(current_track)
+    sync_selected_pattern_length()
+end
+
+
+function toggle_jam_track_bank()
+
+    jam_track_bank =
+        jam_track_bank == 0
+        and
+        1
+        or
+        0
+
+    -- Keep the same Scene-button position when changing banks:
+    -- T1 <-> T9, T2 <-> T10, ... T8 <-> T16.
+    current_track =
+        (
+            (
+                current_track
+                -
+                1
+            )
+            %
+            8
+        )
+        +
+        1
+        +
+        jam_track_bank
+        *
+        8
+
+    reset_track_edit_view()
+
+    reaper.gmem_write(
+        CURRENT_TRACK_GMEM,
+        current_track
+    )
+
+    reaper.gmem_write(JAM_TRACK_BANK_GMEM, jam_track_bank)
+    reaper.gmem_write(JAM_STEP_BANK_GMEM, jam_step_bank)
+
+    sync_tracker_alias(current_track)
+    sync_selected_pattern_length()
+
+    save_meta_state(
+        true
+    )
+end
+
+
+function set_track_mute(
+    track_index,
+    muted
+)
+
+    track_index =
+        clamp(
+            track_index,
+            1,
+            NUM_TRACKS
+        )
+
+    local new_value =
+        muted
+        and
+        true
+        or
+        false
+
+    if track_muted[track_index]
+        ~=
+        new_value
+    then
+
+        track_muted[track_index] =
+            new_value
+
+        write_track_mix_gmem(
+            track_index
+        )
+
+        write_mute_summary_gmem()
+
+        save_mix_state(
+            true
+        )
+    end
+end
+
+
+function toggle_track_mute(track_index)
+
+    track_index =
+        clamp(
+            track_index,
+            1,
+            NUM_TRACKS
+        )
+
+    set_track_mute(
+        track_index,
+        not track_muted[
+            track_index
+        ]
+    )
+end
+
+
+function set_track_solo(
+    track_index,
+    soloed
+)
+
+    track_index =
+        clamp(
+            track_index,
+            1,
+            NUM_TRACKS
+        )
+
+    local new_value =
+        soloed
+        and
+        true
+        or
+        false
+
+    if track_solo[track_index]
+        ~=
+        new_value
+    then
+
+        track_solo[track_index] =
+            new_value
+
+        write_track_mix_gmem(
+            track_index
+        )
+
+        write_solo_summary_gmem()
+
+        save_mix_state(
+            true
+        )
+    end
+end
+
+
+function toggle_track_solo(track_index)
+
+    track_index =
+        clamp(
+            track_index,
+            1,
+            NUM_TRACKS
+        )
+
+    set_track_solo(
+        track_index,
+        not track_solo[
+            track_index
+        ]
+    )
+end
+
+
+function clear_all_mutes()
+
+    local changed = false
+
+    for track_index = 1, NUM_TRACKS do
+        if track_muted[track_index] then
+            track_muted[track_index] = false
+            write_track_mix_gmem(track_index)
+            changed = true
+        end
+    end
+
+    write_mute_summary_gmem()
+
+    if changed then
+        save_mix_state(true)
+    end
+end
+
+
+function clear_all_solos()
+
+    local changed = false
+
+    for track_index = 1, NUM_TRACKS do
+        if track_solo[track_index] then
+            track_solo[track_index] = false
+            write_track_mix_gmem(track_index)
+            changed = true
+        end
+    end
+
+    write_solo_summary_gmem()
+
+    if changed then
+        save_mix_state(true)
+    end
+end
+
+
+function set_jam_group_mode(solo_mode)
+
+    jam_group_solo_mode =
+        solo_mode
+        and
+        true
+        or
+        false
+
+    reaper.gmem_write(
+        JAM_GROUP_MODE_GMEM,
+        jam_group_solo_mode
+        and
+        1
+        or
+        0
+    )
+
+    save_meta_state(
+        true
+    )
+end
+
+
+function set_track_volume(
+    track_index,
+    value
+)
+
+    track_index =
+        clamp(
+            track_index,
+            1,
+            NUM_TRACKS
+        )
+
+    value =
+        clamp(
+            math.floor(
+                value
+            ),
+            0,
+            127
+        )
+
+    if track_volume[track_index]
+        ~=
+        value
+    then
+
+        track_volume[track_index] =
+            value
+
+        write_track_mix_gmem(
+            track_index
+        )
+
+        save_mix_state(
+            true
+        )
+    end
+end
+
+
+function update_jam_connection_state()
+
+    local heartbeat =
+        reaper.gmem_read(
+            JAM_HEARTBEAT
+        )
+
+    local now =
+        reaper.time_precise()
+
+    if heartbeat ~= jam_last_heartbeat then
+
+        jam_last_heartbeat =
+            heartbeat
+
+        jam_last_heartbeat_time =
+            now
+    end
+
+    jam_connected =
+        (
+            now
+            -
+            jam_last_heartbeat_time
+        )
+        <
+        0.5
+end
+
+
+function set_jam_touch_mode(mode)
+
+    mode = clamp(math.floor(mode or 0), 0, 3)
+
+    if jam_touch_mode == mode then
+        jam_touch_mode = 0
+    else
+        jam_touch_mode = mode
+    end
+
+    reaper.gmem_write(JAM_TOUCH_MODE_GMEM, jam_touch_mode)
+
+    if jam_touch_mode == 1 then start_tutorial("VELOCITY TOUCH")
+    elseif jam_touch_mode == 2 then start_tutorial("PROBABILITY TOUCH")
+    elseif jam_touch_mode == 3 then start_tutorial("LENGTH TOUCH")
+    else tutorial_until = 0
+    end
+end
+
+
+function visible_step_for_strip(strip_index)
+
+    local reference = current_step
+
+    if playhead_follow_enabled and playing then
+        reference = clamp(math.floor(reaper.gmem_read(3)) + 1, 1, MAX_STEPS)
+    end
+
+    local first = math.floor((reference - 1) / 8) * 8 + 1
+    return clamp(first + strip_index - 1, 1, MAX_STEPS)
+end
+
+
+function apply_jam_touchstrip(strip_index, value)
+
+    strip_index = clamp(math.floor(strip_index), 1, 8)
+    value = clamp(math.floor(value), 0, 127)
+
+    if jam_touch_mode == 0 then
+        -- Touch strips are intentionally inactive outside tracker edit modes.
+        return
+    end
+
+    dismiss_tutorial()
+
+    local step = visible_step_for_strip(strip_index)
+    local c = tracker[current_track][step]
+
+    if c.note < 0 then
+        return
+    end
+
+    if jam_touch_mode == 1 then
+        c.velocity = value
+
+    elseif jam_touch_mode == 2 then
+        c.probability = clamp(math.floor((value / 127) * 10 + 0.5) * 10, 0, 100)
+
+    elseif jam_touch_mode == 3 then
+        local choices = clamp(length_touch_range, 4, #LENGTH_TOUCH_VALUES)
+        local bucket = math.floor((value / 128) * choices) + 1
+        bucket = clamp(bucket, 1, choices)
+        c.length = LENGTH_TOUCH_VALUES[bucket]
+    end
+
+    write_cell(current_track, step)
+    save_track_state(current_track, true)
+end
+
+
+function change_length_touch_range(direction)
+
+    direction = direction < 0 and -1 or 1
+    length_touch_range = clamp(length_touch_range + direction, 4, #LENGTH_TOUCH_VALUES)
+    reaper.gmem_write(LENGTH_TOUCH_RANGE_GMEM, length_touch_range)
+    save_user_preferences()
+    dismiss_tutorial()
+end
+
+
+function reset_jam_touch_values(whole_track)
+    if jam_touch_mode <= 0 then return end
+
+    local function reset_cell(c)
+        if c.note < 0 then return end
+        if jam_touch_mode == 1 then c.velocity = RESET_VELOCITY
+        elseif jam_touch_mode == 2 then c.probability = RESET_PROBABILITY
+        elseif jam_touch_mode == 3 then c.length = RESET_LENGTH
+        end
+    end
+
+    if whole_track then
+        local active_length = track_pattern_length[current_track] or pattern_length
+        for step = 1, active_length do
+            reset_cell(tracker[current_track][step])
+            write_cell(current_track, step)
+        end
+    else
+        for strip_index = 1, 8 do
+            local step = visible_step_for_strip(strip_index)
+            reset_cell(tracker[current_track][step])
+            write_cell(current_track, step)
+        end
+    end
+
+    save_track_state(current_track, true)
+    dismiss_tutorial()
+end
+
+
+function trigger_direct_audition(note, is_on)
+
+    reaper.gmem_write(DIRECT_AUDITION_NOTE_GMEM, clamp(math.floor(note), 0, 127))
+    reaper.gmem_write(DIRECT_AUDITION_VELOCITY_GMEM, default_velocity)
+    reaper.gmem_write(DIRECT_AUDITION_CHANNEL_GMEM, current_track - 1)
+    reaper.gmem_write(DIRECT_AUDITION_ON_GMEM, is_on and 1 or 0)
+    reaper.gmem_write(
+        DIRECT_AUDITION_TRIGGER_GMEM,
+        math.floor(reaper.gmem_read(DIRECT_AUDITION_TRIGGER_GMEM)) + 1
+    )
+end
+
+
+function direct_note_base_note(button_index, sharp)
+
+    local offsets = {9, 11, 0, 2, 4, 5, 7}
+    local note = octave_base_note() + offsets[button_index]
+
+    if sharp and button_index ~= 2 and button_index ~= 5 then
+        note = note + 1
+    end
+
+    return clamp(note, 0, 127)
+end
+
+
+function direct_note_press(button_index)
+
+    if button_index == 8 then
+        jam_h_sharp_held = true
+        dismiss_tutorial()
+
+        for i = 1, 7 do
+            if jam_direct_held_notes[i] ~= nil then
+                local sharp_note = direct_note_base_note(i, true)
+
+                if is_note_in_scale(sharp_note) then
+                    if jam_direct_audition_mode then
+                        trigger_direct_audition(jam_direct_held_notes[i], false)
+                        trigger_direct_audition(sharp_note, true)
+                    elseif jam_direct_written_steps[i] ~= nil then
+                        local step = jam_direct_written_steps[i]
+                        tracker[current_track][step].note = sharp_note
+                        write_cell(current_track, step)
+                        save_track_state(current_track, true)
+                    else
+                        local write_step = current_step
+                        enter_midi_note(sharp_note, default_velocity)
+                        jam_direct_written_steps[i] = write_step
+                    end
+
+                    jam_direct_held_notes[i] = sharp_note
+                end
+            end
+        end
+
+        return
+    end
+
+    if button_index < 1 or button_index > 7 then return end
+
+    dismiss_tutorial()
+
+    local note = direct_note_base_note(button_index, jam_h_sharp_held)
+    jam_direct_held_notes[button_index] = note
+    jam_direct_written_steps[button_index] = nil
+
+    if not is_note_in_scale(note) then
+        return
+    end
+
+    if jam_direct_audition_mode then
+        trigger_direct_audition(note, true)
+    else
+        local write_step = current_step
+        enter_midi_note(note, default_velocity)
+        jam_direct_written_steps[button_index] = write_step
+    end
+end
+
+
+function direct_note_release(button_index)
+
+    if button_index == 8 then
+        jam_h_sharp_held = false
+        return
+    end
+
+    if button_index < 1 or button_index > 7 then return end
+
+    local note = jam_direct_held_notes[button_index]
+
+    if note ~= nil and jam_direct_audition_mode then
+        trigger_direct_audition(note, false)
+    end
+
+    jam_direct_held_notes[button_index] = nil
+    jam_direct_written_steps[button_index] = nil
+end
+
+
+function toggle_jam_direct_note_mode()
+
+    if jam_direct_note_mode and jam_direct_audition_mode then
+        for i = 1, 7 do
+            if jam_direct_held_notes[i] ~= nil then
+                trigger_direct_audition(jam_direct_held_notes[i], false)
+            end
+        end
+    end
+
+    jam_direct_note_mode = not jam_direct_note_mode
+    jam_h_sharp_held = false
+    jam_direct_held_notes = {}
+    jam_direct_written_steps = {}
+
+    if not jam_direct_note_mode then
+        jam_direct_audition_mode = false
+        tutorial_until = 0
+    else
+        jam_touch_mode = 0
+        start_tutorial("DIRECT NOTE")
+    end
+
+    publish_mk3_led_modes()
+end
+
+
+function toggle_jam_direct_audition()
+
+    if not jam_direct_note_mode then return end
+
+    jam_direct_audition_mode = not jam_direct_audition_mode
+    reaper.gmem_write(JAM_DIRECT_AUDITION_GMEM, jam_direct_audition_mode and 1 or 0)
+    dismiss_tutorial()
+end
+
+
+function process_jam_events()
+
+    local read = math.floor(reaper.gmem_read(JAM_READ))
+    local write = math.floor(reaper.gmem_read(JAM_WRITE))
+    local safety = 0
+
+    while read ~= write and safety < JAM_SLOTS do
+
+        local address = JAM_BASE + read * JAM_STRIDE
+        local event_type = math.floor(reaper.gmem_read(address + 0))
+        local a = math.floor(reaper.gmem_read(address + 1))
+        local b = math.floor(reaper.gmem_read(address + 2))
+
+        if event_type == 1 then
+            handle_jam_matrix_step(jam_matrix_step(a))
+
+        elseif event_type == 2 then
+            select_jam_track(jam_button_to_track(a))
+
+        elseif event_type == 3 then
+            local target_track = jam_button_to_track(a)
+            if jam_group_solo_mode then toggle_track_solo(target_track)
+            else toggle_track_mute(target_track) end
+
+        elseif event_type == 4 then
+            apply_jam_touchstrip(a, b)
+
+        elseif event_type == 5 then
+            toggle_jam_track_bank()
+
+        elseif event_type == 6 then
+            toggle_jam_select_mode()
+
+        elseif event_type == 7 then
+            set_jam_group_mode(a > 0)
+
+        elseif event_type == 8 then
+            resize_current_pattern_duplicate(a)
+
+        elseif event_type == 9 then
+            change_jam_step_bank(a)
+
+        elseif event_type == 10 then
+            toggle_jam_direct_note_mode()
+
+        elseif event_type == 11 then
+            toggle_jam_direct_audition()
+
+        elseif event_type == 12 then
+            if jam_direct_note_mode then
+                if b > 0 then direct_note_press(a) else direct_note_release(a) end
+            end
+
+        elseif event_type == 13 then
+            if jam_direct_note_mode then
+                set_entry_octave(entry_octave + a)
+                dismiss_tutorial()
+            elseif jam_touch_mode == 3 then
+                change_length_touch_range(a)
+            end
+
+        elseif event_type == 14 then
+            set_jam_touch_mode(a)
+
+        elseif event_type == 15 then
+            clear_all_mutes()
+
+        elseif event_type == 16 then
+            clear_all_solos()
+
+        elseif event_type == 17 then
+            reset_jam_touch_values(a > 0)
+        end
+
+        read = read + 1
+        if read >= JAM_SLOTS then read = 0 end
+        safety = safety + 1
+    end
+
+    reaper.gmem_write(JAM_READ, read)
+end
+
+
+-- ============================================================
+-- JAM LED FEEDBACK
+--
+-- Matrix:
+--   empty    = off
+--   note     = dim current-track colour
+--   playhead = white
+--
+-- V0.30 deliberately does NOT highlight the tracker cursor/selected step.
+-- This makes note presence readable at a glance on the Jam.
+--
+-- Scene 1-8:
+--   track colours, selected track bright
+--
+-- Group A-H:
+--   track colour when unmuted, bright white when muted
+-- ============================================================
+
+function update_jam_led_state()
+
+    local playhead =
+        math.floor(
+            reaper.gmem_read(3)
+        )
+        +
+        1
+
+    local colour_index =
+        clamp(
+            current_track,
+            1,
+            NUM_TRACKS
+        )
+
+    local bright_colour = TRACK_LED_BRIGHT[colour_index]
+    local colour_base = math.max(1, bright_colour - 2)
+
+    for local_step = 1, 64 do
+
+        local step = jam_matrix_step(local_step)
+        local cell = tracker[current_track][step]
+        local led_value = 0
+
+        if cell.note >= 0 and cell.velocity > 0 then
+            if cell.velocity <= 32 then
+                led_value = colour_base
+            elseif cell.velocity <= 64 then
+                led_value = colour_base + 1
+            elseif cell.velocity <= 96 then
+                led_value = colour_base + 2
+            else
+                led_value = colour_base + 3
+            end
+        end
+
+        if playing and step == playhead then
+            if cell.note >= 0 then
+                led_value = JAM_LED_WHITE_BRIGHT
+            else
+                led_value = JAM_LED_WHITE_DIM
+            end
+        end
+
+        reaper.gmem_write(
+            JAM_LED_BASE + local_step - 1,
+            led_value
+        )
+    end
+
+
+    -- Detect newly-triggered notes on all 16 tracker tracks so Scene
+    -- flashes remain correct regardless of which Jam bank is visible.
+    local flash_now =
+        reaper.time_precise()
+
+    for track_index = 1, NUM_TRACKS do
+
+        local newly_triggered =
+            false
+
+        for step_index = 1, MAX_STEPS do
+
+            local is_active =
+                reaper.gmem_read(
+                    active_address(
+                        track_index,
+                        step_index
+                    )
+                )
+                >
+                0
+
+            if is_active
+                and
+                not jam_previous_active[
+                    track_index
+                ][step_index]
+            then
+
+                newly_triggered =
+                    true
+            end
+
+            jam_previous_active[
+                track_index
+            ][step_index] =
+                is_active
+        end
+
+
+        if newly_triggered then
+
+            jam_scene_flash_until[
+                track_index
+            ] =
+                flash_now
+                +
+                0.10
+        end
+    end
+
+
+    -- Eight physical Scene / Group buttons display whichever 8-track
+    -- Jam bank is active.
+    for button_index = 1, 8 do
+
+        local track_index =
+            jam_button_to_track(
+                button_index
+            )
+
+        -- V0.32 Scene LED rule:
+        --
+        -- selected track                 = bright track colour
+        -- non-selected + pattern has note = dim track colour
+        -- non-selected + empty pattern    = completely off
+        -- real note trigger               = brief white flash
+        --
+        -- Only the ACTIVE pattern length is considered. Hidden data
+        -- beyond the current pattern length does not make the Scene
+        -- button appear occupied.
+        local scene_pattern_has_note =
+            false
+
+        local scene_pattern_length =
+            track_pattern_length[
+                track_index
+            ]
+            or
+            pattern_length
+
+        for scene_step = 1,
+            scene_pattern_length
+        do
+
+            if tracker[
+                track_index
+            ][scene_step].note
+                >=
+                0
+            then
+
+                scene_pattern_has_note =
+                    true
+
+                break
+            end
+        end
+
+
+        local scene_led = 0
+
+        if current_track ==
+            track_index
+        then
+
+            scene_led =
+                TRACK_LED_BRIGHT[
+                    track_index
+                ]
+
+        elseif scene_pattern_has_note then
+
+            scene_led =
+                TRACK_LED_DIM[
+                    track_index
+                ]
+        end
+
+
+        if flash_now
+            <
+            jam_scene_flash_until[
+                track_index
+            ]
+        then
+
+            scene_led =
+                JAM_LED_WHITE_BRIGHT
+        end
+
+
+        reaper.gmem_write(
+            JAM_SCENE_LED_BASE
+            +
+            button_index
+            -
+            1,
+            scene_led
+        )
+
+
+        -- A-H normally show active Mute/Solo state. In DIRECT NOTE
+        -- they temporarily become note-letter keys; bottom MUTE/SOLO
+        -- LEDs continue to expose global mute/solo status.
+        local group_led = 0
+
+        if jam_direct_note_mode then
+            if button_index <= 7 then
+                group_led = TRACK_LED_BRIGHT[current_track]
+            else
+                group_led = JAM_LED_WHITE_BRIGHT
+            end
+        else
+            local group_active =
+                jam_group_solo_mode
+                and track_solo[track_index]
+                or track_muted[track_index]
+
+            if group_active then
+                group_led = TRACK_LED_BRIGHT[track_index]
+            end
+        end
+
+
+        reaper.gmem_write(
+            JAM_GROUP_LED_BASE
+            +
+            button_index
+            -
+            1,
+            group_led
+        )
+    end
+
+    write_mute_summary_gmem()
+    write_solo_summary_gmem()
+
+    -- Touch-strip LED height mirrors the currently active strip function.
+    for strip_index = 1, 8 do
+        local strip_led = 0
+
+        if jam_touch_mode == 0 then
+            strip_led = 0
+        else
+            local step = visible_step_for_strip(strip_index)
+            local cell = tracker[current_track][step]
+
+            if cell.note >= 0 then
+                if jam_touch_mode == 1 then
+                    strip_led = clamp(cell.velocity, 0, 127)
+                elseif jam_touch_mode == 2 then
+                    strip_led = clamp(math.floor((cell.probability / 100) * 127 + 0.5), 0, 127)
+                elseif jam_touch_mode == 3 then
+                    local choices = clamp(length_touch_range, 4, #LENGTH_TOUCH_VALUES)
+                    local bucket = 1
+                    local best_distance = math.abs(cell.length - LENGTH_TOUCH_VALUES[1])
+                    for i = 2, choices do
+                        local distance = math.abs(cell.length - LENGTH_TOUCH_VALUES[i])
+                        if distance < best_distance then
+                            bucket = i
+                            best_distance = distance
+                        end
+                    end
+                    strip_led = clamp(math.floor((bucket / choices) * 127 + 0.5), 0, 127)
+                end
+            end
+        end
+
+        reaper.gmem_write(JAM_STRIP_LED_BASE + strip_index - 1, strip_led)
+    end
+
+    reaper.gmem_write(JAM_TRACK_BANK_GMEM, jam_track_bank)
+    reaper.gmem_write(JAM_STEP_BANK_GMEM, jam_step_bank)
+
+    reaper.gmem_write(
+        JAM_GROUP_MODE_GMEM,
+        jam_group_solo_mode
+        and
+        1
+        or
+        0
+    )
+end
+
+
+function update_mk3_pad_led_state()
+
+    local theme = TRACK_LED_BRIGHT[clamp(current_track, 1, NUM_TRACKS)]
+    local white = JAM_LED_WHITE_BRIGHT
+    local orange = TRACK_LED_BRIGHT[8]
+    local current_division = current_step_division()
+    local current_length = pattern_length
+
+    for pad_index = 0, 15 do
+        local value = 0
+
+        if variation_held and not sensitivity_mode and not pattern_edit_mode
+            and not pattern_select_mode and not arranger_mode
+            and not scale_edit_mode and not settings_held then
+            -- Probability = cyan, Velocity = orange, Density = green,
+            -- Bias controls = violet, octave span = white.
+            if pad_index <= 3 then
+                value = TRACK_LED_BRIGHT[2]
+            elseif pad_index <= 7 then
+                value = TRACK_LED_BRIGHT[8]
+            elseif pad_index <= 11 then
+                value = TRACK_LED_BRIGHT[5]
+            elseif pad_index == 12 then
+                -- Pad 13: Bias is dark when Bias is OFF.
+                value = (variation_bias_mode > 0) and TRACK_LED_BRIGHT[4] or 0
+            elseif pad_index == 13 then
+                -- Pad 14: Weight only exists while a Bias is active.
+                value = (variation_bias_mode > 0 and variation_bias_strength > 0)
+                    and TRACK_LED_BRIGHT[4]
+                    or 0
+            else
+                value = white
+            end
+
+        elseif sensitivity_mode then
+            if pad_index < 8 then
+                value = (encoder_sensitivity[sensitivity_selected_encoder] == pad_index + 1) and white or orange
+            end
+
+        elseif pattern_edit_mode then
+            local presets = {1, 2, 4, 8, 16, 32, 64, 128}
+            if pad_index < 8 then
+                value = (presets[pad_index + 1] == current_length) and white or theme
+            else
+                local division_index = pad_index - 7
+                value = (STEP_DIVISIONS[division_index] == current_division) and white or orange
+            end
+
+        elseif pattern_select_mode then
+            local slot = pad_index + 1
+            if selected_pattern(current_track) == slot then
+                value = white
+            elseif pattern_created[current_track][slot] then
+                value = theme
+            else
+                value = 0
+            end
+
+        elseif arranger_mode then
+            local slot = pad_index + 1
+            local seq = arranger_sequences[current_track] or {}
+            local pos = clamp(math.floor(arranger_edit_position[current_track] or 1), 1, MAX_ARRANGER_STEPS)
+            local selected_in_sequence = seq[pos] == slot
+            if selected_in_sequence then
+                value = white
+            elseif pattern_created[current_track][slot] then
+                value = theme
+            else
+                value = 0
+            end
+
+        elseif scale_edit_mode then
+            if pad_index == 0 then value = scale_lock_enabled and white or theme end
+
+        elseif settings_held then
+            if pad_index < 10 then
+                local active = false
+                if pad_index == 0 then active = step_wrapping
+                elseif pad_index == 1 then active = arranger_view_vertical
+                elseif pad_index == 2 then active = playhead_follow_enabled
+                elseif pad_index == 3 then active = bank_nav_relative
+                elseif pad_index == 4 then active = tutorials_enabled
+                elseif pad_index == 5 then active = inherit_velocity
+                elseif pad_index == 6 then active = inherit_length
+                elseif pad_index == 7 then active = inherit_probability
+                elseif pad_index == 8 then active = inherit_command
+                elseif pad_index == 9 then active = true_song_mode
+                end
+                value = active and white or theme
+            end
+
+        else
+            if pad_index <= 11 then value = theme else value = white end
+        end
+
+        reaper.gmem_write(MK3_PAD_LED_BASE + pad_index, value)
+        reaper.gmem_write(
+            MK3_PAD_NOTE_MAP_BASE + pad_index,
+            scale_pad_note(pad_index, false)
+        )
+    end
+end
+
+
+function clear_jam_led_state()
+
+    for i = 0, JAM_LED_COUNT - 1 do
+
+        reaper.gmem_write(
+            JAM_LED_BASE + i,
+            0
+        )
+    end
+
+    for i = 0, 7 do
+
+        reaper.gmem_write(
+            JAM_SCENE_LED_BASE + i,
+            0
+        )
+
+        reaper.gmem_write(
+            JAM_GROUP_LED_BASE + i,
+            0
+        )
+
+        reaper.gmem_write(
+            JAM_STRIP_LED_BASE + i,
+            0
+        )
+    end
+end
+
+
+function move_column(amount)
+
+    current_column =
+        clamp(
+            current_column
+            +
+            amount,
+            COL_NOTE,
+            COL_PROB
+        )
+end
+
+
+function move_track(amount)
+
+    local previous_track = current_track
+    current_track =
+        clamp(
+            current_track
+            +
+            amount,
+            1,
+            NUM_TRACKS
+        )
+
+    if current_track ~= previous_track then reset_track_edit_view() end
+    reaper.gmem_write(CURRENT_TRACK_GMEM, current_track)
+    sync_tracker_alias(current_track)
+    sync_selected_pattern_length()
+end
+
+
+function advance_after_note()
+
+    if not quick_step_mode then
+        return
+    end
+
+    if step_wrapping then
+
+        if current_step >=
+            pattern_length
+        then
+
+            current_step = 1
+
+        else
+
+            current_step =
+                current_step
+                +
+                1
+        end
+
+    else
+
+        if current_step <
+            MAX_STEPS
+        then
+
+            current_step =
+                current_step
+                +
+                1
+        end
+    end
+
+    update_scroll()
+end
+
+
+function previous_note_cell_for_step(target_step)
+
+    target_step = clamp(math.floor(target_step or current_step), 1, MAX_STEPS)
+
+    for step = target_step - 1, 1, -1 do
+        local previous = tracker[current_track][step]
+        if previous.note >= 0 then
+            return previous
+        end
+    end
+
+    return nil
+end
+
+
+function initialise_new_note_parameters(cell, target_step, entered_velocity)
+
+    cell.velocity = clamp(math.floor(entered_velocity or default_velocity), 1, 127)
+    cell.pan = RESERVED_CELL3
+    cell.length = NEW_NOTE_LENGTH
+    cell.probability = NEW_NOTE_PROBABILITY
+    cell.command = NEW_NOTE_COMMAND
+    cell.parameter = NEW_NOTE_PARAMETER
+
+    local previous = previous_note_cell_for_step(target_step)
+
+    if previous ~= nil then
+        if inherit_velocity then
+            cell.velocity = clamp(math.floor(previous.velocity or RESET_VELOCITY), 1, 127)
+        end
+        if inherit_length then
+            cell.length = clamp(math.floor(previous.length or NEW_NOTE_LENGTH), 1, 64)
+        end
+        if inherit_probability then
+            cell.probability = quantize_probability(previous.probability or NEW_NOTE_PROBABILITY)
+        end
+        if inherit_command then
+            cell.command = clamp(math.floor(previous.command or 0), 0, 9)
+            cell.parameter = command_parameter_clamp(cell.command, previous.parameter or 0)
+        end
+    end
+end
+
+
+function enter_midi_note(
+    midi_note,
+    velocity
+)
+
+    midi_note =
+        clamp(
+            midi_note,
+            0,
+            127
+        )
+
+    velocity =
+        clamp(
+            velocity,
+            1,
+            127
+        )
+
+    local c =
+        tracker[
+            current_track
+        ][current_step]
+
+    c.note =
+        midi_note
+
+    initialise_new_note_parameters(c, current_step, velocity)
+
+    write_cell(
+        current_track,
+        current_step
+    )
+
+    save_track_state(
+        current_track,
+        true
+    )
+
+    audition_note(c.note, c.velocity, current_track)
+
+    advance_after_note()
+end
+
+
+function enter_mk3_pad(
+    pad_index,
+    input_velocity
+)
+
+    local note =
+        scale_pad_note(
+            pad_index,
+            false
+        )
+
+    if note < 0 or note > 127 then
+        return
+    end
+
+    last_mk3_pad_note = note
+
+    if pad_index > 11 then
+        return
+    end
+
+    local velocity
+
+    if fixed_velocity then
+        velocity = FIXED_VELOCITY_VALUE
+    else
+        velocity = clamp(input_velocity, 1, 127)
+    end
+
+    enter_midi_note(note, velocity)
+end
+
+
+function enter_keyboard_note(offset)
+
+    local note =
+        octave_base_note()
+        +
+        offset
+
+    if note >= 0
+        and
+        note <= 127
+    then
+
+        enter_midi_note(
+            note,
+            default_velocity
+        )
+    end
+end
+
+
+function set_octave_from_page(page)
+
+    entry_octave = clamp(page - 1, -1, 6)
+end
+
+
+function clear_current_step()
+    if arranger_mode then
+        remove_arranger_entry()
+        return
+    end
+
+    tracker[
+        current_track
+    ][current_step] =
+        new_empty_cell()
+
+    write_cell(
+        current_track,
+        current_step
+    )
+
+    save_track_state(
+        current_track,
+        true
+    )
+end
+
+
+function clear_all_steps_current_track()
+    if arranger_mode then
+        clear_arranger_sequence()
+        return
+    end
+
+    for step = 1, MAX_STEPS do
+
+        tracker[
+            current_track
+        ][step] =
+            new_empty_cell()
+
+        write_cell(
+            current_track,
+            step
+        )
+    end
+
+    current_step = 1
+    update_scroll()
+
+    save_track_state(
+        current_track,
+        true
+    )
+end
+
+
+function clear_current_field()
+
+    local c =
+        tracker[
+            current_track
+        ][current_step]
+
+    if current_column ==
+        COL_NOTE
+    then
+
+        -- Clearing the NOTE field clears the whole step and
+        -- restores every parameter to its canonical default.
+        tracker[
+            current_track
+        ][current_step] =
+            new_empty_cell()
+
+        write_cell(
+            current_track,
+            current_step
+        )
+
+        save_track_state(
+            current_track,
+            true
+        )
+
+        return
+
+    elseif current_column ==
+        COL_VOL
+    then
+        c.velocity = 100
+
+    elseif current_column ==
+        COL_CMD
+    then
+        c.command = 0
+        c.parameter = 0
+
+    elseif current_column ==
+        COL_PARAM
+    then
+        c.parameter = 0
+
+    elseif current_column ==
+        COL_LEN
+    then
+        c.length = 1
+
+    elseif current_column ==
+        COL_PROB
+    then
+        c.probability = 100
+    end
+
+    write_cell(
+        current_track,
+        current_step
+    )
+
+    save_track_state(
+        current_track,
+        true
+    )
+end
+
+
+function reset_current_step_defaults()
+
+    local c = tracker[current_track][current_step]
+
+    -- Preserve NOTE exactly; reset every other editable step parameter.
+    c.velocity = RESET_VELOCITY
+    c.pan = RESERVED_CELL3
+    c.command = 0
+    c.parameter = 0
+    c.length = RESET_LENGTH
+    c.probability = RESET_PROBABILITY
+
+    write_cell(current_track, current_step)
+    save_track_state(current_track, true)
+end
+
+
+-- V0.45.5 FOLLOW + Top Button 6. Reset every non-note value across the current
+-- active pattern as one edit while preserving every NOTE exactly.
+function reset_current_pattern_defaults()
+    local active_length = track_pattern_length[current_track] or pattern_length
+    for step = 1, active_length do
+        local c = tracker[current_track][step]
+        c.velocity = RESET_VELOCITY
+        c.pan = RESERVED_CELL3
+        c.command = 0
+        c.parameter = 0
+        c.length = RESET_LENGTH
+        c.probability = RESET_PROBABILITY
+        write_cell(current_track, step)
+    end
+    save_track_state(current_track, true)
+end
+
+
+function set_knob_focus(knob_index)
+
+    knob_focus =
+        clamp(
+            math.floor(
+                knob_index
+            ),
+            1,
+            8
+        )
+
+    knob_focus_until =
+        reaper.time_precise()
+        +
+        KNOB_FOCUS_SECONDS
+end
+
+
+function change_current_note_with_4d(delta)
+
+    delta =
+        clamp(
+            math.floor(delta),
+            -1,
+            1
+        )
+
+    if delta == 0 then
+        return
+    end
+
+    local c =
+        tracker[
+            current_track
+        ][current_step]
+
+    current_column =
+        COL_NOTE
+
+    -- On an empty step, the first detent creates Pad 1 from the
+    -- currently selected MK3 A-H bank. The direction of that first
+    -- detent is intentionally ignored, so the exact Pad 1 pitch is
+    -- created. Subsequent detents transpose by one semitone.
+    if c.note < 0 then
+
+        c.note =
+            clamp(
+                octave_base_note(),
+                0,
+                127
+            )
+
+        initialise_new_note_parameters(
+            c,
+            current_step,
+            fixed_velocity and FIXED_VELOCITY_VALUE or default_velocity
+        )
+
+    else
+
+        c.note =
+            clamp(
+                c.note
+                +
+                delta,
+                0,
+                127
+            )
+    end
+
+    set_knob_focus(1)
+
+    write_cell(
+        current_track,
+        current_step
+    )
+
+    audition_note(
+        c.note,
+        c.velocity,
+        current_track
+    )
+
+    save_track_state(
+        current_track,
+        true
+    )
+end
+
+
+function toggle_four_d_mode()
+
+    if visualizer_mode then
+        toggle_visualizer_auto()
+        return
+    end
+
+    -- The 4-D push always returns to one of its two base modes.
+    -- If PAT LEN was active, the MIDI engine has already cleared its
+    -- shared gmem flag before this event reaches Lua.
+    pattern_edit_mode = false
+
+    four_d_note_mode =
+        not four_d_note_mode
+end
+
+
+function apply_encoder(delta)
+
+    delta =
+        clamp(
+            math.floor(delta),
+            -1,
+            1
+        )
+
+    if delta == 0 then
+        return
+    end
+
+    if visualizer_mode then
+        change_visualizer_style(delta)
+        return
+    end
+
+    if arranger_mode then
+        -- Directional presses navigate the grid. Rotary movement only edits
+        -- the selected cell after 4-D PUSH has explicitly entered CELL EDIT.
+        if arranger_cell_edit_mode then
+            cycle_arranger_cell(delta)
+        end
+        return
+    end
+
+    if tempo_mode or pattern_edit_mode then
+        dismiss_tutorial()
+    end
+
+    if tempo_mode then
+
+        change_reaper_tempo(delta)
+
+    elseif pattern_edit_mode then
+
+        set_pattern_length(pattern_length + delta)
+        set_knob_focus(8)
+
+    elseif four_d_note_mode then
+
+        change_current_note_with_4d(
+            delta
+        )
+
+    else
+
+        move_step(
+            delta
+        )
+
+        set_knob_focus(8)
+    end
+end
+
+
+function sensitivity_delta(knob_index, raw_delta)
+
+    local level = clamp(math.floor(encoder_sensitivity[knob_index] or 5), 1, 8)
+    local multiplier = 1
+    local threshold = 1
+
+    if level == 1 then threshold = 8
+    elseif level == 2 then threshold = 6
+    elseif level == 3 then threshold = 4
+    elseif level == 4 then threshold = 3
+    elseif level == 5 then threshold = 2
+    elseif level == 6 then threshold = 1
+    elseif level == 7 then multiplier = 2
+    elseif level == 8 then multiplier = 4
+    end
+
+    if follow_modifier and threshold > 1 then
+        threshold = 1
+    end
+
+    if multiplier > 1 then
+        mk3_knob_accumulator[knob_index] = 0
+        return raw_delta * multiplier
+    end
+
+    local accumulated = (mk3_knob_accumulator[knob_index] or 0) + raw_delta
+    local delta = 0
+
+    if accumulated >= threshold then
+        delta = 1
+        accumulated = accumulated - threshold
+    elseif accumulated <= -threshold then
+        delta = -1
+        accumulated = accumulated + threshold
+    end
+
+    mk3_knob_accumulator[knob_index] = accumulated
+    return delta
+end
+
+
+function update_sensitivity_demo(knob_index, delta)
+
+    sensitivity_selected_encoder = knob_index
+    dismiss_tutorial()
+
+    local value = sensitivity_demo_values[knob_index] or 0
+
+    if knob_index == 1 then
+        value = clamp(value + delta, 0, 127)
+    elseif knob_index == 2 then
+        value = clamp(value + delta, 1, 64)
+    elseif knob_index == 3 then
+        value = clamp(value + delta, 0, 127)
+    elseif knob_index == 4 then
+        value = quantize_probability(value + delta * 10)
+    elseif knob_index == 5 then
+        value = clamp(value + (delta > 0 and 1 or -1), 0, 9)
+    elseif knob_index == 6 then
+        value = clamp(value + delta, 0, 127)
+    elseif knob_index == 8 then
+        value = clamp(value + delta, 1, MAX_STEPS)
+    end
+
+    sensitivity_demo_values[knob_index] = value
+end
+
+
+function apply_mk3_parameter_knob(
+    knob_index,
+    raw_delta
+)
+
+    knob_index = clamp(math.floor(knob_index), 1, 8)
+    raw_delta = raw_delta < 0 and -1 or (raw_delta > 0 and 1 or 0)
+
+    if raw_delta == 0 then
+        return
+    end
+
+    if arranger_mode then
+        -- In ARRANGER, small knobs cannot accidentally edit tracker cells.
+        -- K8 alone edits the selected REST length, one sensitivity-adjusted
+        -- step at a time. Pattern entries ignore K8 in V0.45.5.
+        if knob_index == 8 then
+            local delta = sensitivity_delta(knob_index, raw_delta)
+            if delta ~= 0 then change_arranger_rest_length(delta) end
+        end
+        return
+    end
+
+    -- K7 is intentionally unassigned in V0.45.5, including Sensitivity Mode.
+    if knob_index == 7 then
+        return
+    end
+
+    if scale_edit_mode then
+        dismiss_tutorial()
+
+        if knob_index == 5 then
+            scale_root = (scale_root + raw_delta) % 12
+            save_meta_state(true)
+        elseif knob_index == 6 then
+            scale_index = clamp(scale_index + raw_delta, 1, #SCALE_NAMES)
+            save_meta_state(true)
+        end
+
+        publish_mk3_led_modes()
+        return
+    end
+
+    local delta = sensitivity_delta(knob_index, raw_delta)
+
+    if sensitivity_mode then
+        if delta ~= 0 then
+            update_sensitivity_demo(knob_index, delta)
+        else
+            sensitivity_selected_encoder = knob_index
+            dismiss_tutorial()
+        end
+        return
+    end
+
+    set_knob_focus(knob_index)
+
+    if delta == 0 then
+        return
+    end
+
+    if knob_index == 8 then
+        move_step(delta)
+        return
+    end
+
+    local c = tracker[current_track][current_step]
+
+    if knob_index == 1 then
+        current_column = COL_NOTE
+
+        if c.note < 0 then
+            c.note = clamp(octave_base_note() + scale_root, 0, 127)
+            if scale_lock_enabled and not is_note_in_scale(c.note) then
+                c.note = scale_degree_note(1)
+            end
+            initialise_new_note_parameters(
+                c, current_step,
+                fixed_velocity and FIXED_VELOCITY_VALUE or default_velocity
+            )
+        else
+            if scale_lock_enabled then
+                c.note = next_scale_note(c.note, delta)
+            else
+                c.note = clamp(c.note + delta, 0, 127)
+            end
+        end
+
+    elseif knob_index == 2 then
+        current_column = COL_LEN
+        c.length = clamp(c.length + delta, 1, 64)
+
+    elseif knob_index == 3 then
+        current_column = COL_VOL
+        c.velocity = clamp(c.velocity + delta, 0, 127)
+        default_velocity = clamp(c.velocity, 1, 127)
+
+    elseif knob_index == 4 then
+        current_column = COL_PROB
+        c.probability = quantize_probability(c.probability + delta * 10)
+
+    elseif knob_index == 5 then
+        current_column = COL_CMD
+        local direction = delta > 0 and 1 or -1
+        local new_command = clamp(c.command + direction, 0, 9)
+        if new_command ~= c.command then
+            c.command = new_command
+            c.parameter = command_default_parameter(new_command)
+        end
+
+    elseif knob_index == 6 then
+        current_column = COL_PARAM
+        if c.command > 0 then
+            c.parameter = command_parameter_clamp(c.command, c.parameter + delta)
+        else
+            c.parameter = 0
+        end
+
+    elseif knob_index == 7 then
+        -- K7 is intentionally unassigned in V0.45.5.
+        return
+    end
+
+    write_cell(current_track, current_step)
+
+    if knob_index == 1 then
+        audition_note(c.note, c.velocity, current_track)
+    end
+
+    save_track_state(current_track, true)
+end
+
+
+function touch_mk3_parameter_knob(knob_index)
+
+    knob_index =
+        clamp(
+            math.floor(
+                knob_index
+            ),
+            1,
+            8
+        )
+
+    if knob_index == 7 then
+        return
+    end
+
+    set_knob_focus(
+        knob_index
+    )
+
+    if scale_edit_mode then
+        dismiss_tutorial()
+        return
+    end
+
+    if sensitivity_mode then
+        sensitivity_selected_encoder = knob_index
+        dismiss_tutorial()
+        return
+    end
+
+    -- Touching Knobs 1-7 also makes that tracker field the
+    -- keyboard/large-navigation selected field. No value changes.
+    if knob_index == 1 then
+
+        current_column =
+            COL_NOTE
+
+    elseif knob_index == 2 then
+
+        current_column =
+            COL_LEN
+
+    elseif knob_index == 3 then
+
+        current_column =
+            COL_VOL
+
+    elseif knob_index == 4 then
+
+        current_column =
+            COL_PROB
+
+    elseif knob_index == 5 then
+
+        current_column =
+            COL_CMD
+
+    elseif knob_index == 6 then
+
+        current_column =
+            COL_PARAM
+
+    elseif knob_index == 7 then
+        -- K7 touch is intentionally unassigned in V0.45.5.
+        return
+    end
+end
+
+
+function toggle_inst_lock_mode()
+    -- Removed in V0.45.5: track number is now the permanent instrument destination.
+    inst_lock_mode = false
+    reaper.gmem_write(INST_LOCK_GMEM, 0)
+end
+
+function set_current_pattern_instruments_to_track()
+    -- Compatibility no-op.
+end
+
+function shift_current_pattern_instruments(amount)
+    -- Compatibility no-op.
+end
+
+function cycle_current_command(direction)
+    direction = direction and (direction < 0 and -1 or 1) or 1
+    local c = tracker[current_track][current_step]
+    local new_command = c.command + direction
+    if new_command > 9 then new_command = 0 end
+    if new_command < 0 then new_command = 9 end
+    c.command = new_command
+    c.parameter = command_default_parameter(new_command)
+    current_column = COL_CMD
+    set_knob_focus(5)
+    write_cell(current_track, current_step)
+    save_track_state(current_track, true)
+end
+
+function transpose_current_note(semitones)
+
+    semitones =
+        math.floor(
+            semitones
+        )
+
+    local c =
+        tracker[
+            current_track
+        ][current_step]
+
+    -- Empty current step: exactly no effect.
+    if c.note < 0 then
+        return
+    end
+
+    local new_note =
+        c.note
+        +
+        semitones
+
+    -- Preserve true octave transposition. If +/-12 would leave MIDI's
+    -- 0..127 range, leave the note unchanged instead of clamping it.
+    if new_note < 0
+        or
+        new_note > 127
+    then
+        return
+    end
+
+    c.note =
+        new_note
+
+    current_column =
+        COL_NOTE
+
+    set_knob_focus(1)
+
+    write_cell(
+        current_track,
+        current_step
+    )
+
+    audition_note(
+        c.note,
         c.velocity,
         current_track
     )
@@ -6000,6 +8995,1006 @@ function draw_tracker()
 
             if is_note_active(
                 current_track,
+                step
+            )
+            then
+
+                set_colour(
+                    0.65,
+                    0.95,
+                    0.68,
+                    1
+                )
+
+                draw_rect(
+                    X_NOTE - 7,
+                    y + 1,
+                    COLUMN_W[
+                        COL_NOTE
+                    ],
+                    ROW_HEIGHT - 3,
+                    true
+                )
+            end
+
+            if step ==
+                current_step
+            then
+
+                local x =
+                    COLUMN_X[
+                        current_column
+                    ]
+                    -
+                    7
+
+                local width =
+                    COLUMN_W[
+                        current_column
+                    ]
+
+                local tr, tg, tb =
+                    current_track_colour()
+
+                set_colour(
+                    0.72 + tr * 0.18,
+                    0.72 + tg * 0.18,
+                    0.72 + tb * 0.18,
+                    1
+                )
+
+                draw_rect(
+                    x,
+                    y + 1,
+                    width,
+                    ROW_HEIGHT - 3,
+                    true
+                )
+
+                set_colour(
+                    tr * 0.72,
+                    tg * 0.72,
+                    tb * 0.72,
+                    1
+                )
+
+                draw_rect(
+                    x,
+                    y + 1,
+                    width,
+                    ROW_HEIGHT - 3,
+                    false
+                )
+            end
+
+            if step ==
+                pattern_length
+            then
+
+                set_colour(
+                    0.15,
+                    0.15,
+                    0.15,
+                    1
+                )
+
+                gfx.line(
+                    0,
+                    y + ROW_HEIGHT - 2,
+                    gfx.w,
+                    y + ROW_HEIGHT - 2
+                )
+            end
+
+            if cell.note >= 0 and cell.probability == 0 then
+
+                set_colour(
+                    0.46,
+                    0.46,
+                    0.46,
+                    1
+                )
+
+            elseif outside
+                and
+                step ~= current_step
+            then
+
+                set_colour(
+                    0.40,
+                    0.40,
+                    0.40,
+                    1
+                )
+
+            else
+
+                set_colour(
+                    0.04,
+                    0.04,
+                    0.04,
+                    1
+                )
+            end
+
+            draw_text(
+                X_STEP,
+                y + 5,
+                string.format(
+                    "%02d",
+                    step
+                )
+            )
+
+            draw_text(
+                X_NOTE,
+                y + 5,
+                note_name(
+                    cell.note
+                )
+            )
+
+            draw_text(
+                X_VOL,
+                y + 5,
+                string.format(
+                    "%03d",
+                    cell.velocity
+                )
+            )
+
+            draw_text(
+                X_CMD,
+                y + 5,
+                command_name(
+                    cell.command
+                )
+            )
+
+            local display_parameter = command_value_for_display(cell.command, cell.parameter)
+            draw_text(
+                X_PARAM,
+                y + 5,
+                signed_value_text(display_parameter)
+            )
+
+            draw_text(
+                X_LEN,
+                y + 5,
+                string.format(
+                    "%02d",
+                    cell.length
+                )
+            )
+
+            draw_text(
+                X_PROB,
+                y + 5,
+                string.format(
+                    "%03d",
+                    cell.probability
+                )
+            )
+        end
+    end
+end
+
+
+function draw_footer()
+
+    local visible =
+        get_visible_steps()
+
+    local y =
+        GRID_Y
+        +
+        visible * ROW_HEIGHT
+        +
+        8
+
+    set_colour(
+        0.12,
+        0.12,
+        0.12,
+        1
+    )
+
+    gfx.setfont(
+        1,
+        "Arial",
+        14
+    )
+
+    draw_text(
+        18,
+        y,
+        "MK3: Pads 1-12 C-B   P13/P14 Step -/+1   P15/P16 Unused"
+    )
+
+    draw_text(
+        18,
+        y + 21,
+        "CC22/23 View Bank   LARGE CC8 = STEP / PAT LEN when CC86 ON   K1-8 = NOTE/LEN/VEL/PROB | CMD/VAL/UNUSED/STEP"
+    )
+
+    draw_text(
+        18,
+        y + 42,
+        "CC30 Up   CC31 Right   CC32 Down   CC33 Left"
+    )
+
+    draw_text(
+        18,
+        y + 63,
+        "JAM: Grid = 64-step bank   Arrows = Bank -/+64   Scene 1-8 = Track   A-H = Mute/Solo"
+    )
+
+    draw_text(
+        18,
+        y + 84,
+        "CC28 Clear Step   CC29 Clear Track   CC57 Play   CC59 Stop"
+    )
+
+    draw_text(
+        18,
+        y + 105,
+        "V0.45.5: Fixed note defaults   Inherit modes   Left-screen Visualiser"
+    )
+
+    draw_text(
+        18,
+        y + 126,
+        "[ ] Pattern -/+1   , . Pattern -/+4   N/M Track"
+    )
+
+    draw_text(
+        18,
+        y + 147,
+        "ENTER Write MIDI   C/V Copy/Paste   Delete Clear Field   ESC Quit"
+    )
+end
+
+
+function draw()
+
+    set_colour(
+        1,
+        1,
+        1,
+        1
+    )
+
+    gfx.rect(
+        0,
+        0,
+        gfx.w,
+        gfx.h,
+        1
+    )
+
+    draw_header()
+    draw_column_headers()
+    draw_tracker()
+    draw_footer()
+
+    gfx.update()
+end
+
+
+local last_mouse_cap = 0
+
+
+function mouse_input()
+
+    local cap =
+        gfx.mouse_cap
+
+    local pressed =
+        (cap & 1) == 1
+        and
+        (last_mouse_cap & 1) == 0
+
+    if pressed then
+
+        local mx =
+            gfx.mouse_x
+
+        local my =
+            gfx.mouse_y
+
+        if mx >= MODE_BUTTON_X
+            and
+            mx <= MODE_BUTTON_X + MODE_BUTTON_W
+            and
+            my >= MODE_BUTTON_Y
+            and
+            my <= MODE_BUTTON_Y + MODE_BUTTON_H
+        then
+
+            toggle_step_mode()
+
+            last_mouse_cap =
+                cap
+
+            return
+        end
+
+
+        if mx >= FIXED_BUTTON_X
+            and
+            mx <= FIXED_BUTTON_X + FIXED_BUTTON_W
+            and
+            my >= FIXED_BUTTON_Y
+            and
+            my <= FIXED_BUTTON_Y + FIXED_BUTTON_H
+        then
+
+            toggle_fixed_velocity()
+
+            last_mouse_cap =
+                cap
+
+            return
+        end
+
+
+        if mx >= WRAP_BUTTON_X
+            and
+            mx <= WRAP_BUTTON_X + WRAP_BUTTON_W
+            and
+            my >= WRAP_BUTTON_Y
+            and
+            my <= WRAP_BUTTON_Y + WRAP_BUTTON_H
+        then
+
+            toggle_step_wrapping()
+
+            last_mouse_cap =
+                cap
+
+            return
+        end
+
+
+        local visible =
+            get_visible_steps()
+
+        if my >= GRID_Y
+            and
+            my <
+            GRID_Y
+            +
+            visible * ROW_HEIGHT
+        then
+
+            local row =
+                math.floor(
+                    (my - GRID_Y)
+                    /
+                    ROW_HEIGHT
+                )
+
+            local step =
+                scroll_step
+                +
+                row
+
+            if step >= 1
+                and
+                step <= MAX_STEPS
+            then
+
+                current_step =
+                    step
+
+                for column = 1, COL_PROB do
+
+                    local left =
+                        COLUMN_X[
+                            column
+                        ]
+                        -
+                        7
+
+                    local right =
+                        left
+                        +
+                        COLUMN_W[
+                            column
+                        ]
+
+                    if mx >= left
+                        and
+                        mx < right
+                    then
+
+                        current_column =
+                            column
+
+                        break
+                    end
+                end
+
+                update_scroll()
+            end
+        end
+    end
+
+    last_mouse_cap =
+        cap
+end
+
+
+local NOTE_KEYS = {
+    [string.byte("a")] = 0,
+    [string.byte("w")] = 1,
+    [string.byte("s")] = 2,
+    [string.byte("e")] = 3,
+    [string.byte("d")] = 4,
+    [string.byte("f")] = 5,
+    [string.byte("t")] = 6,
+    [string.byte("g")] = 7,
+    [string.byte("y")] = 8,
+    [string.byte("h")] = 9,
+    [string.byte("u")] = 10,
+    [string.byte("j")] = 11
+}
+
+
+function keyboard()
+
+    local char =
+        gfx.getchar()
+
+    if char < 0 then
+
+        stop_playback()
+
+        return false
+    end
+
+    if char == 0 then
+        return true
+    end
+
+    if char == 27 then
+
+        stop_playback()
+
+        return false
+    end
+
+    if char == 9 then
+
+        toggle_step_mode()
+
+        return true
+    end
+
+    if char == 32 then
+
+        toggle_playback()
+
+        return true
+    end
+
+    if char == 13 then
+
+        write_pattern_to_midi()
+
+        return true
+    end
+
+    if char == 30064 then
+
+        move_step(-1)
+
+        return true
+    end
+
+    if char == 1685026670 then
+
+        move_step(1)
+
+        return true
+    end
+
+    if char == 1818584692 then
+
+        move_column(-1)
+
+        return true
+    end
+
+    if char == 1919379572 then
+
+        move_column(1)
+
+        return true
+    end
+
+
+    if char >= 65
+        and
+        char <= 90
+    then
+
+        char =
+            char + 32
+    end
+
+
+    if char ==
+        string.byte("\\")
+    then
+
+        toggle_step_wrapping()
+
+        return true
+    end
+
+    if char ==
+        string.byte("[")
+    then
+
+        change_pattern_length(-1)
+
+        return true
+    end
+
+    if char ==
+        string.byte("]")
+    then
+
+        change_pattern_length(1)
+
+        return true
+    end
+
+    if char ==
+        string.byte(",")
+    then
+
+        change_pattern_length(-4)
+
+        return true
+    end
+
+    if char ==
+        string.byte(".")
+    then
+
+        change_pattern_length(4)
+
+        return true
+    end
+
+
+    local note_offset =
+        NOTE_KEYS[
+            char
+        ]
+
+    if note_offset ~= nil
+        and
+        current_column ==
+        COL_NOTE
+    then
+
+        enter_keyboard_note(
+            note_offset
+        )
+
+        return true
+    end
+
+
+    if char ==
+        string.byte("n")
+    then
+
+        move_track(-1)
+
+        return true
+    end
+
+    if char ==
+        string.byte("m")
+    then
+
+        move_track(1)
+
+        return true
+    end
+
+    if char ==
+        string.byte("z")
+    then
+
+        entry_octave =
+            clamp(
+                entry_octave - 1,
+                -1,
+                8
+            )
+
+        save_meta_state(true)
+
+        return true
+    end
+
+    if char ==
+        string.byte("x")
+    then
+
+        entry_octave =
+            clamp(
+                entry_octave + 1,
+                -1,
+                8
+            )
+
+        save_meta_state(true)
+
+        return true
+    end
+
+
+    if char ==
+        string.byte("-")
+    then
+
+        edit_current_value(-1)
+
+        return true
+    end
+
+    if char ==
+        string.byte("+")
+        or
+        char ==
+        string.byte("=")
+    then
+
+        edit_current_value(1)
+
+        return true
+    end
+
+
+    if char ==
+        string.byte("r")
+    then
+
+        set_command(
+            1,
+            4
+        )
+
+        return true
+    end
+
+    if char ==
+        string.byte("p")
+    then
+
+        set_command(
+            2,
+            50
+        )
+
+        return true
+    end
+
+    if char ==
+        string.byte("k")
+    then
+
+        set_command(
+            3,
+            1
+        )
+
+        return true
+    end
+
+    if char ==
+        string.byte("l")
+    then
+
+        set_command(
+            4,
+            1
+        )
+
+        return true
+    end
+
+    if char ==
+        string.byte("q")
+    then
+
+        local cell =
+            tracker[
+                current_track
+            ][current_step]
+
+        cell.command = 0
+        cell.parameter = 0
+
+        write_cell(
+            current_track,
+            current_step
+        )
+
+        save_track_state(
+            current_track,
+            true
+        )
+
+        return true
+    end
+
+
+    if char ==
+        string.byte("c")
+    then
+
+        copy_cell()
+
+        return true
+    end
+
+    if char ==
+        string.byte("v")
+    then
+
+        paste_cell()
+
+        return true
+    end
+
+
+    if char == 8
+        or
+        char == 6579564
+    then
+
+        clear_current_field()
+
+        return true
+    end
+
+
+    return true
+end
+
+
+function cleanup()
+
+    playing = false
+
+    reaper.gmem_write(
+        0,
+        0
+    )
+
+    reaper.gmem_write(
+        6,
+        1
+    )
+
+    clear_jam_led_state()
+
+    for pad_index = 0, 15 do
+        reaper.gmem_write(MK3_PAD_LED_BASE + pad_index, 0)
+    end
+
+    reaper.gmem_write(NOTES_MODE_GMEM, 0)
+    reaper.gmem_write(SENSITIVITY_MODE_GMEM, 0)
+    reaper.gmem_write(SCALE_EDIT_GMEM, 0)
+    reaper.gmem_write(JAM_DIRECT_NOTE_MODE_GMEM, 0)
+    reaper.gmem_write(JAM_DIRECT_AUDITION_GMEM, 0)
+    reaper.gmem_write(JAM_TOUCH_MODE_GMEM, 0)
+
+    write_display_state(
+        false
+    )
+end
+
+
+reaper.atexit(
+    cleanup
+)
+
+
+function main()
+
+    refresh_reaper_track_names(
+        false
+    )
+
+    reaper.gmem_write(
+        1,
+        reaper.Master_GetTempo()
+    )
+
+    reaper.gmem_write(
+        2,
+        current_step_qn()
+    )
+
+    reaper.gmem_write(
+        7,
+        pattern_length
+    )
+
+    reaper.gmem_write(
+        TRACK_PATTERN_LENGTH_BASE
+        +
+        current_track
+        -
+        1,
+        pattern_length
+    )
+
+    reaper.gmem_write(
+        CURRENT_TRACK_GMEM,
+        current_track
+    )
+
+    reaper.gmem_write(
+        JAM_TRACK_BANK_GMEM,
+        jam_track_bank
+    )
+
+    reaper.gmem_write(
+        PAD_MODE_GMEM,
+        note_audition_enabled and 1 or 0
+    )
+
+    reaper.gmem_write(
+        JAM_SELECT_MODE_GMEM,
+        jam_select_mode
+        and
+        1
+        or
+        0
+    )
+
+    reaper.gmem_write(
+        JAM_GROUP_MODE_GMEM,
+        jam_group_solo_mode
+        and
+        1
+        or
+        0
+    )
+
+    reaper.gmem_write(
+        FOLLOW_MOD_GMEM,
+        follow_modifier
+        and
+        1
+        or
+        0
+    )
+
+    reaper.gmem_write(SETTINGS_HELD_GMEM, settings_held and 1 or 0)
+    reaper.gmem_write(TEMPO_MODE_GMEM, tempo_mode and 1 or 0)
+    reaper.gmem_write(ARRANGER_MODE_GMEM, arranger_mode and 1 or 0)
+    reaper.gmem_write(SONG_MODE_GMEM, true_song_mode and 1 or 0)
+    reaper.gmem_write(JAM_STEP_BANK_GMEM, jam_step_bank)
+
+    publish_mk3_led_modes()
+
+    write_solo_summary_gmem()
+
+    pattern_edit_mode =
+        reaper.gmem_read(
+            PATTERN_MODE_GMEM
+        )
+        >
+        0.5
+
+    if reaper.gmem_read(
+        DIRECT_BANK_MODE_GMEM
+    )
+        >
+        0.5
+    then
+
+        local hardware_page =
+            clamp(
+                math.floor(
+                    reaper.gmem_read(
+                        MK3_PAGE_GMEM
+                    )
+                ),
+                0,
+                7
+            )
+
+        if hardware_page ~=
+            mk3_page
+        then
+
+            mk3_page =
+                hardware_page
+
+            mk3_page_initialized =
+                true
+
+            set_octave_from_page(
+                mk3_page
+            )
+        end
+    end
+
+    process_hardware_events()
+
+    process_jam_events()
+
+    update_jam_connection_state()
+
+    update_jam_led_state()
+    update_visualizer_auto_cycle()
+    update_mk3_pad_led_state()
+    publish_mk3_led_modes()
+
+    update_scroll()
+
+    mouse_input()
+
+    local keep_running =
+        keyboard()
+
+    write_display_state(
+        keep_running
+    )
+
+    draw()
+
+    if keep_running then
+
+        reaper.defer(
+            main
+        )
+    end
+end
+
+
+gfx.init(
+    "Maschine Tracker V"
+    ..
+    VERSION,
+    WINDOW_W,
+    WINDOW_H
+)
+
+playing = false
+pattern_length = 16
+quick_step_mode = true
+fixed_velocity = false
+step_wrapping = true
+note_audition_enabled = false
+playhead_follow_enabled = false
+bank_nav_relative = true
+inherit_velocity = false
+inherit_length = false
+inherit_probability = false
+inherit_command = false
+settings_held = false
+tempo_mode = false
+arranger_mode = false
+browser_overview_mode = false
+pattern_select_mode = false
+entry_octave = 4
+
+load_user_preferences()
+
+project_state_loaded =
+    load_project_state()
 refresh_reaper_track_names(
     true
 )
